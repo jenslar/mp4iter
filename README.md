@@ -1,5 +1,14 @@
 Experimental Rust crate for iterating MP4 containers. Does not and will not support any kind of media de/encoding.
 
+Usage (not yet on crates.io):
+
+`Cargo.toml`:
+```toml
+[dependencies]
+mp4iter = {git = "https://github.com/jenslar/mp4iter.git"}
+```
+
+`src/main.rs`:
 ```rs
 use mp4iter::Mp4;
 use std::path::Path;
