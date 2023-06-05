@@ -1,5 +1,7 @@
 //! Core MP4 struct and methods.
 //! 
+//! If an atom can not be located, try running `Mp4::reset()` first to set offset to 0.
+//! 
 //! Note on `hdlr` atom and finding "component name"
 //! (this crate was developed with the need for parsing GoPro MP4 files, hence the examples below):
 //! - The component name is a counted string:
@@ -38,11 +40,11 @@ use binread::{
     BinRead,
     endian::Endian
 };
-use time::ext::NumericalDuration;
+use time::{ext::NumericalDuration, Duration};
 
 use crate::{
     errors::Mp4Error,
-    atom::{Atom, Co64},
+    atom::{Atom, Co64, Tmcd},
     fourcc::FourCC,
     Offset,
     Stts,
@@ -50,7 +52,7 @@ use crate::{
     Stco,
     Hdlr,
     Udta,
-    AtomHeader,
+    AtomHeader, consts::time_zero,
 };
 
 /// Mp4 file.
@@ -87,7 +89,7 @@ impl Mp4 {
     }
 
     /// Returns MP4 file size in bytes.
-    /// To avoid a fallible call,
+    /// To avoid a fallible system call,
     /// use the public field `MP4::len` instead
     pub fn len(&self) -> std::io::Result<u64> {
         Ok(self.file.metadata()?.len())
@@ -144,6 +146,7 @@ impl Mp4 {
         self.read(len)
     }
 
+    // !!! should return new position
     /// Seeks back or forth relative to current position.
     pub fn seek(&mut self, offset_from_current: i64) -> Result<(), Mp4Error> {
         let pos_seek = self.file.seek(SeekFrom::Current(offset_from_current))?;
@@ -154,6 +157,7 @@ impl Mp4 {
         Ok(())
     }
 
+    // !!! should return new position
     /// Seeks from start.
     pub fn seek_to(&mut self, offset_from_start: u64) -> Result<(), Mp4Error> {
         let pos_seek = self.file.seek(SeekFrom::Start(offset_from_start))?;
@@ -163,23 +167,6 @@ impl Mp4 {
         }
         Ok(())
     }
-
-    // /// Check if len to read exceeds file size.
-    // pub fn check_bounds(&mut self, len_to_try: u64) -> Result<(), Mp4Error> {
-    //     // TODO 221016 bounds check not working as expected.
-    //     // TODO        bounds error for max360/fusion if used (but not max-heromode),
-    //     // TODO        but parses fine if commented out...
-    //     // TODO        is self.len/size incorrectly set/used?
-    //     // TODO        no error for hero-series if self.check_bounds is used
-    //     // TODO        something in multi-device (Fusion/Max) gpmf structure that causes this?
-    //     let aim = self.pos()? + len_to_try;
-    //     let len = self.len;
-    //     if aim > len {
-    //         Err(Mp4Error::BoundsError((aim, len)))
-    //     } else {
-    //         Ok(())
-    //     }
-    // }
 
     pub fn next(&mut self) -> Result<AtomHeader, Mp4Error> {
         // 8 or 16 bytes header depending on whether 32 or 64bit sized atom
@@ -303,6 +290,41 @@ impl Mp4 {
         }
     }
 
+    /// Returns timecode data to derive start time of video.
+    /// 
+    /// For GoPro, use `GoPro TCD` as handler name.
+    pub fn tmcd(&mut self, handler_name: &str) -> Result<Tmcd, Mp4Error> {
+        while let Ok(hdlr) = self.hdlr() {
+            // 1. find the `trak` with specified handler name
+            if &hdlr.component_name == handler_name {
+                // 2. find sample description atom
+                if let Some(stsd_header) = self.find("stsd")? {
+                    // seek to start of 'number of entries' field
+                    self.seek_to(stsd_header.data_offset() + 4)?;
+
+                    // 3. iterate sample descriptions (same general layout as any atom)
+                    let no_of_entries = self.read_type::<u32>(4, Endian::Big)?;
+                    
+                    for _i in (0..no_of_entries as usize).into_iter() {
+                        let header = self.header()?;
+
+                        if header.name == FourCC::Tmcd {
+                            let mut tmcd = self.atom(&header)?.tmcd()?;
+                            // !!! Duration is unscaled.
+                            // !!! To get correct duriation: offset.duration / tmcd.time_scale
+                            tmcd.offsets = self.offsets_at_current_pos()?;
+                            return Ok(tmcd)
+                        }
+
+                        self.seek(header.offset_next() as i64)? // u64 cast as i64...
+                    }
+                }
+            }
+        }
+
+        Err(Mp4Error::MissingHandler(handler_name.to_owned()))
+    }
+
     /// Extract user data atom (`udta`).
     /// Some vendors embed data such as device info,
     /// unique identifiers (Garmin VIRB UUID),
@@ -327,13 +349,70 @@ impl Mp4 {
     /// Returns duration of MP4.
     /// Derived from `mvhd` atom (inside `moov` atom),
     /// which lists duration for whichever track is the longest.
+    /// 
+    /// Reference `mvhd`: <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-SW1>
     pub fn duration(&mut self) -> Result<time::Duration, Mp4Error> {
         // ensure search is done from beginning of file
         self.reset()?;
         // Find 'mvhd' atom (inside 'moov' atom)
         if let Some(header) = self.find("mvhd")? {
+            // println!("{header:?}\ndata offset: {} data size: {}", header.data_offset(), header.data_size());
             // seek to start of 'mvhd' + until 'time scale' field
+            // self.seek_to(header.data_offset() + 12)?; // old was offset + 20 using start of atom
+            // !!! START New time impl with creation time
             self.seek_to(header.data_offset() + 4)?; // old was offset + 20 using start of atom
+
+            let start = time_zero() + time::Duration::seconds(self.read(4)?.read_be::<u32>()? as i64);
+            println!("START TIME: {start:?}");
+
+            self.seek(4)?;
+
+            // !!! END new time impl
+            
+            // Read time scale value and scaled duration, normalises to seconds
+            let time_scale = self.read(4)?.read_be::<u32>()?;
+            let scaled_duration = self.read(4)?.read_be::<u32>()?;
+
+            // println!("SCALE: {}, DUR: {}", time_scale, scaled_duration);
+
+            // Generate 'time::Duration' from normalised duration
+            let duration = (scaled_duration as f64 / time_scale as f64).seconds();
+
+            // Check for zero length video (also for tracking bugs)
+            if duration == Duration::ZERO {
+                return Err(Mp4Error::ZeroLengthVideo)
+            }
+    
+            Ok(duration)
+        } else {
+            Err(Mp4Error::NoSuchAtom("mvhd".to_owned()))
+        }
+    }
+
+    /// Returns creation time and duration of MP4
+    /// as the tuple `(START_TIME, DURATION)`.
+    /// Derived from `mvhd` atom (inside `moov` atom),
+    /// which lists duration for whichever track is the longest.
+    /// 
+    /// Note the some recording devices, such as GoPro may have the same
+    /// `START_TIME` for all clips in the same session. This depends on the
+    /// exact model. For these, find the `trak` with the title `GoPro TCD` instead
+    /// and use the timecode data in there (`tmcd` entry in an `stsd` atom).
+    /// 
+    /// Reference `mvhd`: <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-SW1>
+    pub fn time(&mut self) -> Result<(time::PrimitiveDateTime, time::Duration), Mp4Error> {
+        // ensure search is done from beginning of file
+        self.reset()?;
+        // Find 'mvhd' atom (inside 'moov' atom)
+        if let Some(header) = self.find("mvhd")? {
+            // seek to start of 'mvhd' + until 'creation time' field
+            self.seek_to(header.data_offset() + 4)?;
+
+            // generate start datetime
+            let start_time = time_zero() + time::Duration::seconds(self.read(4)?.read_be::<u32>()? as i64);
+
+            // seek to 'time scale' field
+            self.seek(4)?;
             
             // Read time scale value and scaled duration, normalises to seconds
             let time_scale = self.read(4)?.read_be::<u32>()?;
@@ -341,8 +420,13 @@ impl Mp4 {
 
             // Generate 'time::Duration' from normalised duration
             let duration = (scaled_duration as f64 / time_scale as f64).seconds();
+
+            // Check for zero length video (also for tracking bugs)
+            if duration == Duration::ZERO {
+                return Err(Mp4Error::ZeroLengthVideo)
+            }
     
-            Ok(duration)
+            Ok((start_time, duration))
         } else {
             Err(Mp4Error::NoSuchAtom("mvhd".to_owned()))
         }
@@ -371,29 +455,58 @@ impl Mp4 {
             if &hdlr.component_name == handler_name {
                 // TODO 230112 order of 'st..' atoms consistent?
                 // TODO        possible solution: find hdlr, read hdlr as atom, then inside hdlr cursor find stts etc
-                let stts = self.stts()?;
-                let stsz = self.stsz()?;
-                // Check if file size > 32bit limit,
-                // but always output 64bit offsets
-                let stco = match self.len > u32::MAX as u64 {
-                    true => self.co64()?,
-                    false => Co64::from(self.stco()?),
-                };
+                // let stts = self.stts()?;
+                // let stsz = self.stsz()?;
+                // // Check if file size > 32bit limit,
+                // // but always output 64bit offsets
+                // let stco = match self.len > u32::MAX as u64 {
+                //     true => self.co64()?,
+                //     false => Co64::from(self.stco()?),
+                // };
 
-                // Assert equal size of all contained Vec:s to allow iter in parallel
-                assert_eq!(stco.len(), stsz.len(), "'stco' and 'stsz' atoms differ in data size");
-                assert_eq!(stts.len(), stsz.len(), "'stts' and 'stsz' atoms differ in data size");
+                // // Assert equal size of all contained Vec:s to allow iter in parallel
+                // assert_eq!(stco.len(), stsz.len(), "'stco' and 'stsz' atoms differ in data size");
+                // assert_eq!(stts.len(), stsz.len(), "'stts' and 'stsz' atoms differ in data size");
 
-                let offsets: Vec<Offset> = stts.iter()
-                    .zip(stsz.iter())
-                    .zip(stco.iter())
-                    .map(|((duration, size), position)| Offset::new(*position, *size, *duration))
-                    .collect();
+                // let offsets: Vec<Offset> = stts.iter()
+                //     .zip(stsz.iter())
+                //     .zip(stco.iter())
+                //     .map(|((duration, size), position)| Offset::new(*position, *size, *duration))
+                //     .collect();
 
-                return Ok(offsets)
+                // return Ok(offsets)
+                return self.offsets_at_current_pos()
             }
         }
 
         Err(Mp4Error::MissingHandler(handler_name.to_owned()))
+    }
+
+    /// Internal. Returns offsets for current `trak`.
+    /// I.e. assumes upcoming atoms are `stts` (sample to time),
+    /// `stsz` (sample to size), `stco` (sample to offset) atoms, and process these.
+    fn offsets_at_current_pos(&mut self) -> Result<Vec<Offset>, Mp4Error> {
+        // TODO 230112 order of 'st..' atoms consistent?
+        // TODO        possible solution: find hdlr, read hdlr as atom, then inside hdlr cursor find stts etc
+        let stts = self.stts()?;
+        let stsz = self.stsz()?;
+        // Check if file size > 32bit limit,
+        // but always output 64bit offsets
+        let stco = match self.len > u32::MAX as u64 {
+            true => self.co64()?,
+            false => Co64::from(self.stco()?),
+        };
+
+        // Assert equal size of all contained Vec:s to allow iter in parallel
+        assert_eq!(stco.len(), stsz.len(), "'stco' and 'stsz' atoms differ in data size");
+        assert_eq!(stts.len(), stsz.len(), "'stts' and 'stsz' atoms differ in data size");
+
+        let offsets: Vec<Offset> = stts.iter()
+            .zip(stsz.iter())
+            .zip(stco.iter())
+            .map(|((duration, size), position)| Offset::new(*position, *size, *duration))
+            .collect();
+
+        return Ok(offsets)
     }
 }

@@ -2,72 +2,11 @@
 
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
-use binread::{BinReaderExt, BinRead, BinResult};
+use binread::{BinReaderExt, BinRead, BinResult, Endian};
 
-use crate::{errors::Mp4Error, fourcc::FourCC, CONTAINER};
+use crate::{errors::Mp4Error, fourcc::FourCC, Offset};
 
-use super::{Hdlr, Stco, Stsz, Stts, Udta, UdtaField, stco::Co64};
-
-/// Atom header.
-/// 8 or 16 bytes in MP4, depending on whether
-/// 32 or 64-bit sized.
-/// ```
-/// | [X X X X] [Y Y Y Y] [Z Z Z Z Z Z Z Z] |
-///    |         |         |
-///    |         |         64bit size (if 32 bit size == 1)
-///    |         FourCC
-///    32bit size
-/// ```
-#[derive(Debug, Clone)]
-pub struct AtomHeader {
-    /// Total size in bytes including 8/16 byte header.
-    pub size: u64,
-    /// FourCC
-    pub name: FourCC,
-    /// Byte offset for start of atom in MP4,
-    /// i.e. byte offset where atom size is specified.
-    pub offset: u64,
-}
-
-impl AtomHeader {
-    /// Convenience method to check whether atom at current offset is
-    /// a container or not.
-    pub fn is_container(&self) -> bool {
-        CONTAINER.contains(&self.name.to_str())
-    }
-
-    /// Determine header size in bytes in MP4.
-    pub fn header_size(&self) -> u8 {
-        match self.size > u32::MAX as u64 {
-            true => 16,
-            false => 8,
-        }
-    }
-
-    /// Data offset, adjusted for header size.
-    pub fn data_offset(&self) -> u64 {
-        self.offset + self.header_size() as u64
-    }
-
-    /// Size of data load, adjusted for header size.
-    /// (Not including header size)
-    pub fn data_size(&self) -> u64 {
-        self.size - self.header_size() as u64
-    }
-
-    /// Relative offset to next atom,
-    /// adjusted for header size.
-    pub fn offset_next(&self) -> u64 {
-        // let mut adjust = 8;
-        // if self.size > u32::MAX as u64 {
-        //     adjust = 16;
-        // }
-        match self.is_container() {
-            true => 0,
-            false => self.size - self.header_size() as u64
-        }
-    }
-}
+use super::{AtomHeader, Hdlr, Stco, Stsz, Stts, Udta, UdtaField, stco::Co64, hdlr::ComponentType, Tmcd};
 
 /// MP4 atom.
 pub struct Atom {
@@ -88,11 +27,10 @@ impl Atom {
         self.header.size
     }
 
-    // pub fn name(&self) -> &FourCC {
-    //     &self.header.name
-    // }
-
-    pub fn iter(&mut self) {}
+    /// Seek from current position
+    pub fn seek(&mut self, offset_from_current: i64) -> Result<u64, std::io::Error> {
+        self.cursor.seek(SeekFrom::Current(offset_from_current))
+    }
 
     /// Read single Big Endian value.
     pub fn read<T: Sized + BinRead>(&mut self) -> BinResult<T> {
@@ -202,7 +140,7 @@ impl Atom {
         Ok(Stsz::new(sizes?))
     }
 
-    /// Parse `Atom` into `Stco` (sample to size in bytes)
+    /// Parse `Atom` into `Stco` (sample to offset in bytes)
     /// if `Atom.name` is `stco`.
     pub fn stco(&mut self) -> Result<Stco, Mp4Error> {
         self.match_name(&FourCC::Stco)?;
@@ -246,7 +184,7 @@ impl Atom {
         // Seek past version (1 byte) + flags (3 bytes)
         self.cursor.seek(SeekFrom::Current(4))?;
 
-        let component_type = self.cursor.read_be::<u32>()?;
+        let component_type = ComponentType::from(self.cursor.read_be::<u32>()?);
         let component_sub_type = self.cursor.read_be::<u32>()?;
         let component_manufacturer = self.cursor.read_be::<u32>()?;
         let component_flags = self.cursor.read_be::<u32>()?;
@@ -266,6 +204,25 @@ impl Atom {
             component_flags_mask,
             component_name: component_name.trim().to_owned()
         })
+    }
+
+    /// Timecode entry in a sample description atom (`stsd`).
+    /// Layout mimcs that of atoms: `size | fourcc | data load`.
+    /// Found in `trak` atoms with the media handler type `tmcd`.
+    /// 
+    /// Does not set offsets.
+    /// 
+    /// Can be used to e.g. sort clipschronologically if part of the same
+    /// recording session.
+    /// 
+    /// For a GoPro MP4, find a `trak` where the `hdlr` atom has
+    /// component type `tmcd`, and component name `GoPro TCD`.
+    pub fn tmcd(&mut self) -> Result<Tmcd, Mp4Error>  {
+        let _ = self.seek(6)?; // seek past 'reserved' 6-byte section
+        let tmcd: Tmcd = BinRead::read(&mut self.cursor)?;
+        // tmcd.offsets = self.offsets_at_current_pos()?;
+        // println!("read tmcd offsets: {:?}", tmcd.offsets);
+        Ok(tmcd) // offsets not set
     }
 
     /// User data atom. Contains custom data depending on vendor.
@@ -293,5 +250,38 @@ impl Atom {
         }
 
         Ok(Udta{fields})
+    }
+
+    /// Internal. Returns offsets for current `trak`.
+    /// I.e. assumes upcoming atoms are `stts` (sample to time),
+    /// `stsz` (sample to size), `stco` (sample to offset) atoms, and process these.
+    fn offsets_at_current_pos(&mut self) -> Result<Vec<Offset>, Mp4Error> {
+        // TODO 230112 order of 'st..' atoms consistent?
+        // TODO        possible solution: find hdlr, read hdlr as atom, then inside hdlr cursor find stts etc
+        println!("getting offsets at pos {}", self.pos());
+        let stts = self.stts()?;
+        println!("{stts:?}");
+        let stsz = self.stsz()?;
+        println!("{stsz:?}");
+        // Check if file size > 32bit limit,
+        // but always output 64bit offsets
+        let stco = Co64::from(self.stco()?);
+        // let stco = match self.cursor.len() > u32::MAX as u64 {
+        //     true => self.co64()?,
+        //     false => Co64::from(self.stco()?),
+        // };
+        println!("{stsz:?}");
+
+        // Assert equal size of all contained Vec:s to allow iter in parallel
+        assert_eq!(stco.len(), stsz.len(), "'stco' and 'stsz' atoms differ in data size");
+        assert_eq!(stts.len(), stsz.len(), "'stts' and 'stsz' atoms differ in data size");
+
+        let offsets: Vec<Offset> = stts.iter()
+            .zip(stsz.iter())
+            .zip(stco.iter())
+            .map(|((duration, size), position)| Offset::new(*position, *size, *duration))
+            .collect();
+
+        return Ok(offsets)
     }
 }

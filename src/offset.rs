@@ -5,7 +5,7 @@
 /// MP4 byte offset (from `stco` atom), size in bytes (from `stsz` atom),
 /// and duration (from `stts`atom) in milliseconds
 /// for a chunk of data.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Offset {
     /// Offset in bytes from start of file.
     // pub position: u32,

@@ -25,7 +25,10 @@ pub enum FourCC {
     Mvhd,
     Smhd,
     Stbl,
+    /// Chunk offset, 32-bit value
     Stco,
+    /// Chunk offset, 64-bit value
+    Co64,
     Stsc,
     Stsd,
     Stss,
@@ -33,32 +36,12 @@ pub enum FourCC {
     Stts,
     Tkhd,
     Tmcd,
+    /// Track description
     Trak,
     Tref,
+    /// User data
     Udta,
     Vmhd,
-
-    // Device specific atoms
-    /// Equivalent to Stco for GoPro MP4
-    /// with filesizes above 32bit limit.
-    Co64,
-
-    // // Device specific Four CC (not in Apple's documentation)
-    // // Model dependent.
-    // /// GPMF: GoPro GPMF data atom (undocumented)
-    // Gpmf,
-    // /// FIRM: GoPro firmware version
-    // Firm,
-    // /// LENS: GoPro lens serial number
-    // Lens,
-    // /// CAME: GoPro camera (serial?)
-    // Came,
-    // /// SETT: GoPro ?
-    // Sett,
-    // /// MUID: GoPro Media unique identifier, does not specify clip sequence
-    // Muid,
-    // /// HMMT: GoPro ?
-    // Hmmt,
 
     Custom(String)
 }
@@ -66,6 +49,7 @@ pub enum FourCC {
 impl FourCC {
     pub fn from_slice(fourcc: &[u8]) -> Self {
         match fourcc {
+            // Atoms
             b"dinf" => Self::Dinf,
             b"dref" => Self::Dref,
             b"edts" => Self::Edts,
@@ -89,15 +73,21 @@ impl FourCC {
             b"stsz" => Self::Stsz,
             b"stts" => Self::Stts,
             b"tkhd" => Self::Tkhd,
-            b"tmcd" => Self::Tmcd,
             b"trak" => Self::Trak,
             b"tref" => Self::Tref,
             b"udta" => Self::Udta,
             b"vmhd" => Self::Vmhd,
             b"co64" => Self::Co64,
-            // b"GPMF" => Self::Gpmf, // capitals in file
+            
+            // Atom-internal data structures
+            b"tmcd" => Self::Tmcd,
+
             _ => Self::Custom(String::from_utf8_lossy(fourcc).to_string()),
         }
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        Self::from_slice(&value.to_be_bytes())
     }
 
     pub fn from_str(fourcc: &str) -> Self {

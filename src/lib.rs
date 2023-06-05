@@ -46,5 +46,5 @@ pub use atom::Stsz;
 pub use atom::Stco;
 pub use atom::Hdlr;
 pub use atom::{Udta, UdtaField};
-pub use consts::CONTAINER;
+pub use consts::{CONTAINER, time_zero};
 pub use errors::Mp4Error;

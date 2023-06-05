@@ -4,6 +4,8 @@
 //! follow immediately after the parent header. Try [AtomicParsley](https://atomicparsley.sourceforge.net)
 //! for much better support in this regard.
 
+use time::{self, PrimitiveDateTime, Month};
+
 // If the atom is a "container",
 // it's nested and contains more atoms,
 // within its specified, total size.
@@ -22,3 +24,9 @@ pub const CONTAINER: [&'static str; 9] = [
     // "dref", // moov.trak.mdia.minf.dinf.dref
     // "stsd", // moov.trak.mdia.minf.stbl.stsd
 ];
+
+/// Time zero for MP4 containers. January 1, 1904.
+pub fn time_zero() -> PrimitiveDateTime {
+    time::Date::from_calendar_date(1904, Month::January, 1).unwrap()
+        .with_hms_milli(0, 0, 0, 0).unwrap()
+}
