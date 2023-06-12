@@ -363,7 +363,6 @@ impl Mp4 {
             self.seek_to(header.data_offset() + 4)?; // old was offset + 20 using start of atom
 
             let start = time_zero() + time::Duration::seconds(self.read(4)?.read_be::<u32>()? as i64);
-            println!("START TIME: {start:?}");
 
             self.seek(4)?;
 
