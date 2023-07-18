@@ -14,7 +14,7 @@
 //! 
 //! ```rs
 //! use mp4iter::Mp4;
-//! //! use std::path::Path;
+//! use std::path::Path;
 //! 
 //! fn main() -> std::io::Result<()> {
 //!     let mp4 = Mp4::new(Path::new("VIDEO.MP4"))?;
@@ -23,8 +23,11 @@
 //!         println!("{atom_header:?}")
 //!     }
 //!
-//!     // Derives duration for MP4 without the need for FFmpeg or similar.
+//!     // Derives duration for MP4 for longest track.
 //!     println!("{:?}", mp4.duration());
+//! 
+//!     // Extracts offsets for GoPro GPMF telemetry (handlre name 'GoPro MET')
+//!     println!("{:#?}", mp4.offsets("GoPro MET"));
 //! 
 //!     Ok(())
 //! }
@@ -46,5 +49,5 @@ pub use atom::Stsz;
 pub use atom::Stco;
 pub use atom::Hdlr;
 pub use atom::{Udta, UdtaField};
-pub use consts::{CONTAINER, time_zero};
+pub use consts::{CONTAINER, mp4_time_zero};
 pub use errors::Mp4Error;

@@ -6,6 +6,8 @@
 /// See https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-56313.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FourCC {
+    /// Composition offset atom
+    Ctts,
     /// Data Information Atoms
     Dinf,
     Dref,
@@ -25,9 +27,9 @@ pub enum FourCC {
     Mvhd,
     Smhd,
     Stbl,
-    /// Chunk offset, 32-bit value
+    /// Chunk offset, 32-bit values
     Stco,
-    /// Chunk offset, 64-bit value
+    /// Chunk offset, 64-bit values
     Co64,
     Stsc,
     Stsd,
@@ -92,6 +94,7 @@ impl FourCC {
 
     pub fn from_str(fourcc: &str) -> Self {
         match fourcc {
+            "ctts" => Self::Ctts,
             "dinf" => Self::Dinf,
             "dref" => Self::Dref,
             "edts" => Self::Edts,
@@ -128,6 +131,7 @@ impl FourCC {
 
     pub fn to_str(&self) -> &str {
         match self {
+            Self::Ctts => "ctts",
             Self::Dinf => "dinf",
             Self::Dref => "dref",
             Self::Edts => "edts",
@@ -160,6 +164,12 @@ impl FourCC {
             // Self::Gpmf => "GPMF", // capitals in file
             Self::Custom(s) => s.as_str()
         }
+    }
+}
+
+impl Default for FourCC {
+    fn default() -> Self {
+        Self::Custom("None".to_owned())
     }
 }
 // dinf

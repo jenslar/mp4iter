@@ -1,87 +1,135 @@
 //! MP4 atom.
 
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::{io::{Cursor, Read, Seek, SeekFrom, BufReader}, fs::File};
 
-use binread::{BinReaderExt, BinRead, BinResult, Endian};
+use binrw::{BinReaderExt, BinRead, BinResult, Endian};
 
-use crate::{errors::Mp4Error, fourcc::FourCC, Offset};
+use crate::{errors::Mp4Error, fourcc::FourCC};
 
-use super::{AtomHeader, Hdlr, Stco, Stsz, Stts, Udta, UdtaField, stco::Co64, hdlr::ComponentType, Tmcd};
+use super::{AtomHeader, Hdlr, Stco, Stsz, Stts, Udta, UdtaField, stco::Co64, Tmcd, Mvhd};
 
 /// MP4 atom.
-pub struct Atom {
+pub struct Atom<'a> {
     /// Header
     pub header: AtomHeader,
-    /// Raw data load, excluding 8 byte header (size + name).
-    pub cursor: Cursor<Vec<u8>>
+    /// Reader over MP4, starting
+    /// after atom header.
+    reader: &'a mut BufReader<File>
 }
 
-impl Atom {
-    // pub fn new(cursor: &mut Cursor<Vec<u8>>) {
+impl <'a> Atom<'a> {
+    pub fn new(
+        header: &AtomHeader,
+        reader: &'a mut BufReader<File>
+    ) -> Self {
+        Self {
+            header: header.to_owned(),
+            reader
+        }
+    }
 
-    // }
+    // pub fn find(&self) {}
 
-    pub fn find(&self) {}
-
+    /// Total size of the atom in bytes.
     pub fn size(&self) -> u64 {
         self.header.size
     }
 
+    pub fn name(&self) -> FourCC {
+        self.header.name.to_owned()
+    }
+
+    pub fn data_size(&self) -> u64 {
+        self.header.data_size()
+    }
+
     /// Seek from current position
     pub fn seek(&mut self, offset_from_current: i64) -> Result<u64, std::io::Error> {
-        self.cursor.seek(SeekFrom::Current(offset_from_current))
+        self.reader.seek(SeekFrom::Current(offset_from_current))
     }
 
     /// Read single Big Endian value.
-    pub fn read<T: Sized + BinRead>(&mut self) -> BinResult<T> {
-        self.cursor.read_be::<T>()
+    pub fn read<T>(&mut self) -> BinResult<T>
+        where
+            T: BinRead,
+            <T as BinRead>::Args<'static>: Sized + Clone + Default
+    {
+        self.reader.read_be::<T>()
     }
 
     /// Read multiple Big Endian values of the same primal type.
-    pub fn iter_read<T: Sized + BinRead>(&mut self, repeats: usize) -> BinResult<Vec<T>> {
+    pub fn iter_read<T>(&mut self, repeats: usize) -> BinResult<Vec<T>>
+        where
+            T: BinRead,
+            <T as BinRead>::Args<'static>: Sized + Clone + Default
+    {
         (0..repeats).into_iter()
             .map(|_| self.read::<T>())
             .collect()
     }
 
-    /// Read cursor to string.
+    /// Attempt to read FourCC as `String` at current position.
+    pub fn read_name(&mut self) -> BinResult<String> {
+        Ok(self.reader.read_type::<[u8; 4]>(Endian::Big)?
+            .iter()
+            .map(|n| *n as char)
+            .collect())
+    }
+
+    /// Attempt to read `FourCC` at current position.
+    pub fn read_fourcc(&mut self) -> BinResult<FourCC> {
+        Ok(FourCC::from_slice(self.reader.read_type::<[u8; 4]>(Endian::Big)?.as_slice()))
+    }
+
+    
+    /// Read entire atom data load to string.
     pub fn read_to_string(&mut self) -> std::io::Result<String> {
-        // get number of bytes (NOT number of UTF-8 graphemes).
-        let len = self.cursor.get_ref().len();
-        let mut string = String::with_capacity(len);
-        self.cursor.read_to_string(&mut string)?;
-        Ok(string)
+        // limit read to size of atom data load
+        let len = self.data_size();
+        let mut buf = Vec::with_capacity(len as usize);
+        self.reader.read_exact(&mut buf)?;
+        Ok(String::from_utf8_lossy(&mut buf).to_string())
     }
 
     /// Seek to next atom if nested.
     pub fn next(&mut self) -> Result<u64, Mp4Error> {
         let size = self.read::<u32>()?;
-        self.cursor.seek(SeekFrom::Current(size as i64 - 4))
-            .map_err(|e| Mp4Error::IOError(e))
+        // TODO should probably reset instead then set
+        // TODO offset to start of atom, *then* seek to next
+        self.reader.seek(SeekFrom::Current(size as i64 - 4))
+            .map_err(|e| e.into())
     }
 
-    pub fn pos(&self) -> u64 {
-        self.cursor.position()
+    /// Current position of the reader.
+    pub fn pos(&mut self) -> std::io::Result<u64>  {
+        self.reader.seek(SeekFrom::Current(0))
     }
 
-    /// Set atom cursor position to start of cursor.
-    pub fn reset(&mut self) {
-        self.cursor.set_position(0)
+    /// The absolute byte offset to the atom's start in MP4 file.
+    pub fn start(&self) -> u64 {
+        self.header.offset
     }
 
-    /// Get name of atom (Four CC) at current offset.
-    /// Supports Four CC with byte values above 127 (non-standard ASCII)
-    /// if the numerical values map to ISO8859-1,
-    /// e.g. GoPro uses Four CC `©xyz` in `udta` atom.
-    pub fn name(&mut self, pos: u64) -> Result<String, Mp4Error> {
-        // let mut cursor = self.read_at(self.offset + 4, 4)?;
-        let bytes: Vec<u8> = (pos..pos+4).into_iter()
-            .map(|_| self.cursor.read_be::<u8>())
-            .collect::<BinResult<Vec<u8>>>()?;
-        let name: String = bytes.iter()
-            .map(|b| *b as char)
-            .collect();
-        Ok(name)
+    /// The absolute byte offset to the atom's end in MP4 file.
+    pub fn end(&self) -> u64 {
+        self.header.offset + self.size()
+    }
+
+    /// Returns number of bytes left to read for this atom.
+    pub fn remaining(&mut self) -> std::io::Result<u64> {
+        Ok(self.end() - self.pos()?)
+    }
+
+    /// The absolute byte offset for this atom's data load
+    /// (i.e. after header) in the MP4 file.
+    pub fn data_offset(&self) -> u64 {
+        self.header.data_offset()
+    }
+
+    /// Set reader position to start of atom data load
+    /// (after header).
+    pub fn reset(&mut self) -> std::io::Result<u64> {
+        self.reader.seek(SeekFrom::Start(self.data_offset()))
     }
 
     /// Ensures user specified name (Four CC),
@@ -97,113 +145,92 @@ impl Atom {
         }
     }
 
-    /// Parse `Atom` into `Stts` (time-to sample) if `Atom.name` is `stts`,
+    /// Parse the atom into `Stts` (sample to time) if `Atom.name` is `stts`,
     pub fn stts(&mut self) -> Result<Stts, Mp4Error> {
         self.match_name(&FourCC::Stts)?;
-
-        // Seek past version (1 byte) + flags (3 bytes)
-        self.cursor.seek(SeekFrom::Current(4))?;
-        let no_of_entries = self.read::<u32>()?;
-
-        let mut time_to_sample_table: Vec<u32> = Vec::new();
-        for _ in 0..no_of_entries {
-            let sample_count = self.read::<u32>()?;
-            let sample_duration = self.read::<u32>()?;
-            time_to_sample_table.extend(vec![sample_duration; sample_count as usize])
-            // time_to_sample_table.append(&mut vec![sample_duration; sample_count as usize])
-        }
-
-        Ok(Stts::new(time_to_sample_table))
+        self.reader.read_ne::<Stts>().map_err(|e| e.into())
     }
 
-    /// Parse `Atom` into `Stsz` (sample to size in bytes) if `Atom.name` is `stsz`,
+    /// Parse the atom into `Stsz` (sample to size in bytes) if `Atom.name` is `stsz`,
     pub fn stsz(&mut self) -> Result<Stsz, Mp4Error> {
         self.match_name(&FourCC::Stsz)?;
-
-        // Seek past version (1 byte) + flags (3 bytes)
-        self.cursor.seek(SeekFrom::Current(4))?;
-
-        let sample_size = self.read::<u32>()?;
-        let no_of_entries = self.read::<u32>()?;
-
-        let sizes = match sample_size {
-            0 => {
-                (0..no_of_entries).into_iter()
-                    .map(|_| self.read::<u32>())
-                    .collect()
-            }
-            // Is below really correct? If all samples have the same size
-            // is no_of_entries still representative?
-            _ => Ok(vec![sample_size; no_of_entries as usize]),
-        };
-
-        Ok(Stsz::new(sizes?))
+        self.reader.read_ne::<Stsz>().map_err(|e| e.into())
     }
 
-    /// Parse `Atom` into `Stco` (sample to offset in bytes)
+    /// Parse the atom into `Stco` (sample to offset in bytes)
     /// if `Atom.name` is `stco`.
     pub fn stco(&mut self) -> Result<Stco, Mp4Error> {
         self.match_name(&FourCC::Stco)?;
-
-        // Seek past version (1 byte) + flags (3 bytes)
-        self.cursor.seek(SeekFrom::Current(4))?;
-
-        // let sample_size = self.read::<u32>()?;
-        let no_of_entries = self.read::<u32>()?;
-
-        let offsets: BinResult<Vec<u32>> = (0..no_of_entries).into_iter()
-            .map(|_| self.read::<u32>())
-            .collect();
-
-        Ok(Stco::new(offsets?))
+        self.reader.read_ne::<Stco>().map_err(|e| e.into())
     }
 
-    /// Parse `Atom` into `Co64` (sample to size in bytes)
-    /// if `Atom.name` is `co64`. Equivalent to `stco` for
+    /// Parse the atom into `Co64` (sample to size in bytes)
+    /// if `Atom.name` is `co64`. 64-bit equivalent to `stco` for
     /// file sizes above 32bit limit.
     pub fn co64(&mut self) -> Result<Co64, Mp4Error> {
         self.match_name(&FourCC::Co64)?;
-
-        // Seek past version (1 byte) + flags (3 bytes)
-        self.cursor.seek(SeekFrom::Current(4))?;
-
-        // let sample_size = self.read::<u32>()?;
-        let no_of_entries = self.read::<u32>()?;
-
-        let offsets: BinResult<Vec<u64>> = (0..no_of_entries).into_iter()
-            .map(|_| self.read::<u64>())
-            .collect();
-
-        Ok(Co64::new(offsets?))
+        self.reader.read_ne::<Co64>().map_err(|e| e.into())
     }
 
-    /// Parse `Atom` into `Hdlr` if `Atom.name` is `hdlr`,
+    /// Parse the atom into `Hdlr` if `Atom.name` is `hdlr`,
     pub fn hdlr(&mut self) -> Result<Hdlr, Mp4Error> {
         self.match_name(&&FourCC::Hdlr)?;
+        // hdlr atom without component name set,
+        // since parsing depends on what generated the mp4.
+        // E.g. gopro has a counted string
+        // (first byte in component name contains its length in bytes)
+        // that ends with space \x20, whereas sound handler in old (?)
+        // Apple mp4/quicktimes is not counted and seems to be a null terminated string.
+        let mut hdlr = self.reader.read_ne::<Hdlr>()?;
 
-        // Seek past version (1 byte) + flags (3 bytes)
-        self.cursor.seek(SeekFrom::Current(4))?;
+        // determine how many bytes left to read in atom
+        let rem = self.remaining()?;
 
-        let component_type = ComponentType::from(self.cursor.read_be::<u32>()?);
-        let component_sub_type = self.cursor.read_be::<u32>()?;
-        let component_manufacturer = self.cursor.read_be::<u32>()?;
-        let component_flags = self.cursor.read_be::<u32>()?;
-        let component_flags_mask = self.cursor.read_be::<u32>()?;
-        let component_name_size = self.cursor.read_be::<u8>()?;
-        let mut component_name = String::with_capacity(component_name_size as usize);
-        let read_bytes = self.cursor.read_to_string(&mut component_name)?;
-        if read_bytes != component_name_size as usize {
-            return Err(Mp4Error::ReadMismatch{got: read_bytes as u64, expected: component_name_size as u64})
-        }
+        // create a Vec<u8> with remaining bytes as basis for string
+        let name_vec = self.iter_read::<u8>(rem as usize)?;
 
-        Ok(Hdlr{
-            component_type,
-            component_sub_type,
-            component_manufacturer,
-            component_flags,
-            component_flags_mask,
-            component_name: component_name.trim().to_owned()
-        })
+        // !!! check if first byte is alphanumeric 0_u8.is_alphanumeric(), if not and less than remainder use as count?
+        // let b = b"\x0BGoPro AVC\x20\x20"; // -> do iter windows(b.len()) and a name<&str>.as_bytes() comparins for each iter -> bool
+
+        // Workaround for older MP4 (or Quicktimes) with handler names that are not counted strings.
+        hdlr.component_name = if let Some(maybe_count) = name_vec.first() {
+            if (*maybe_count as u64) <= rem {
+                name_vec[1 .. *maybe_count as usize + 1].iter()
+                    .filter_map(|n| match n {
+                        0 => None,
+                        _ => Some(*n as char)
+                    })
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            } else {
+                name_vec.iter()
+                    .filter_map(|n| match n {
+                        0 => None,
+                        _ => Some(*n as char)
+                    })
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            }
+        } else { // !!! isnt this for a vec with len = 0 so not needed???
+            name_vec.iter()
+                .filter_map(|n| match n {
+                    0 => None,
+                    _ => Some(*n as char)
+                })
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        };
+
+        Ok(hdlr)
+    }
+
+    /// Parse the atom into `Mvhd` if `Atom.name` is `mvhd`,
+    pub fn mvhd(&mut self) -> Result<Mvhd, Mp4Error> {
+        self.match_name(&&FourCC::Mvhd)?;
+        self.reader.read_ne::<Mvhd>().map_err(|e| e.into())
     }
 
     /// Timecode entry in a sample description atom (`stsd`).
@@ -219,10 +246,7 @@ impl Atom {
     /// component type `tmcd`, and component name `GoPro TCD`.
     pub fn tmcd(&mut self) -> Result<Tmcd, Mp4Error>  {
         let _ = self.seek(6)?; // seek past 'reserved' 6-byte section
-        let tmcd: Tmcd = BinRead::read(&mut self.cursor)?;
-        // tmcd.offsets = self.offsets_at_current_pos()?;
-        // println!("read tmcd offsets: {:?}", tmcd.offsets);
-        Ok(tmcd) // offsets not set
+        self.reader.read_ne::<Tmcd>().map_err(|e| e.into())
     }
 
     /// User data atom. Contains custom data depending on vendor.
@@ -233,55 +257,23 @@ impl Atom {
 
         // Atom::size includes 8 byte header
         // TODO remove header bytes from cursor instead? Cleaner, consistent
-        while self.cursor.position() < self.header.size - 8 {
+        // while self.reader.position() < self.header.size - 8 {
+        while self.pos()? < self.end() {
             let size = self.read::<u32>()?;
-            let name = FourCC::from_str(&self.name(self.cursor.position())?);
+            let name = self.read_fourcc()?;
 
             let mut buf: Vec<u8> = vec![0; size as usize - 8];
-            self.cursor.read_exact(&mut buf)?;
+            self.reader.read_exact(&mut buf)?;
 
             let field = UdtaField {
                 name,
                 size,
-                data: Cursor::new(buf)
+                data: Cursor::new(buf) // can not lend bufreader here
             };
 
             fields.push(field)
         }
 
         Ok(Udta{fields})
-    }
-
-    /// Internal. Returns offsets for current `trak`.
-    /// I.e. assumes upcoming atoms are `stts` (sample to time),
-    /// `stsz` (sample to size), `stco` (sample to offset) atoms, and process these.
-    fn offsets_at_current_pos(&mut self) -> Result<Vec<Offset>, Mp4Error> {
-        // TODO 230112 order of 'st..' atoms consistent?
-        // TODO        possible solution: find hdlr, read hdlr as atom, then inside hdlr cursor find stts etc
-        println!("getting offsets at pos {}", self.pos());
-        let stts = self.stts()?;
-        println!("{stts:?}");
-        let stsz = self.stsz()?;
-        println!("{stsz:?}");
-        // Check if file size > 32bit limit,
-        // but always output 64bit offsets
-        let stco = Co64::from(self.stco()?);
-        // let stco = match self.cursor.len() > u32::MAX as u64 {
-        //     true => self.co64()?,
-        //     false => Co64::from(self.stco()?),
-        // };
-        println!("{stsz:?}");
-
-        // Assert equal size of all contained Vec:s to allow iter in parallel
-        assert_eq!(stco.len(), stsz.len(), "'stco' and 'stsz' atoms differ in data size");
-        assert_eq!(stts.len(), stsz.len(), "'stts' and 'stsz' atoms differ in data size");
-
-        let offsets: Vec<Offset> = stts.iter()
-            .zip(stsz.iter())
-            .zip(stco.iter())
-            .map(|((duration, size), position)| Offset::new(*position, *size, *duration))
-            .collect();
-
-        return Ok(offsets)
     }
 }

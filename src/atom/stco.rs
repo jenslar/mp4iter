@@ -1,53 +1,57 @@
-//! Sample-to-offset atom for file sizes under the 32bit limit (`stco`) and above (`co64`).
+//! Sample-to-offset atom for file sizes below the 32bit limit (`stco`) and above (`co64`).
 
-use std::ops::Range;
+use binrw::BinRead;
 
-/// Sample-to-offset (in bytes from start of MP4) atom
-/// for file sizes under the 32bit limit.
-/// Each value represents a byte offset for a data chunk
-/// in the corresponding track.
-#[derive(Debug, Default)]
-pub struct Stco(Vec<u32>);
+/// Sample-to-offset atom.
+#[derive(Debug, Default, BinRead)]
+pub struct Stco {
+    version: u8,
+    flags: [u8; 3],
+    #[br(big)]
+    no_of_entries: u32,
+    #[br(big, count = no_of_entries)]
+    pub offsets: Vec<u32>
+}
+
 impl Stco {
-    pub fn new(values: Vec<u32>) -> Self {
-        Self(values)
-    }
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.no_of_entries as usize
     }
-    pub fn iter(&self) -> impl Iterator<Item = &u32> {
-        self.0.iter()
-    }
-    /// Panics if out of bounds.
-    pub fn slice(&self, range: Range<usize>) -> &[u32] {
-        &self.0[range]
+
+    pub fn expand(&self) -> Vec<u32> {
+        self.offsets.to_owned()
     }
 }
 
-/// Sample-to-offset (in bytes from start of MP4) atom
-/// for file sizes above the 32bit limit.
-/// Each value represents a byte offset for a data chunk
-/// in the corresponding track.
-#[derive(Debug, Default)]
-pub struct Co64(Vec<u64>);
+/// 64bit sample-to-offset atom.
+#[derive(Debug, Default, BinRead)]
+pub struct Co64 {
+    version: u8,
+    flags: [u8; 3],
+    #[br(big)]
+    no_of_entries: u32,
+    #[br(big, count = no_of_entries)]
+    pub offsets: Vec<u64>
+}
+
 impl Co64 {
-    pub fn new(values: Vec<u64>) -> Self {
-        Self(values)
-    }
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.no_of_entries as usize
     }
-    pub fn iter(&self) -> impl Iterator<Item = &u64> {
-        self.0.iter()
-    }
-    /// Panics if out of bounds.
-    pub fn slice(&self, range: Range<usize>) -> &[u64] {
-        &self.0[range]
+
+    pub fn expand(&self) -> Vec<u64> {
+        self.offsets.to_owned()
     }
 }
 
 impl From<Stco> for Co64 {
     fn from(value: Stco) -> Self {
-        Co64(value.0.iter().map(|n| *n as u64).collect())
+        let mut co64 = Self::default();
+        co64.version = value.version;
+        co64.flags = value.flags;
+        co64.no_of_entries = value.no_of_entries;
+        co64.offsets = value.offsets.iter().map(|n| *n as u64).collect();
+
+        co64
     }
 }

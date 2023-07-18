@@ -1,31 +1,46 @@
 //! Time-to-sample atom (`stts`). Time-to-sample table only.
 
-use std::ops::Range;
+use binrw::BinRead;
 
-/// Time-to-sample atom (`stts`). Contains only the expanded sample durations derived from time-to-sample table.
-/// 
-// /// Layout: `Vec<(sample_count, sample_duration)>`.
-/// Layout: `Vec<SAMPLE_DURATION_MILLISECONDS>`
-/// 
-// /// Time-to-sample table:
-// /// - Sample count: A 32-bit integer that specifies the number of consecutive samples that have the same duration.
-// /// - Sample duration: A 32-bit integer that specifies the duration of each sample. (presumably in milliseconds)
+#[derive(Debug, BinRead)]
+pub struct TimeToSample {
+    #[br(big)]
+    sample_count: u32,
+    #[br(big)]
+    sample_duration: u32,
+}
+
+/// Time-to-sample atom (`stts`).
 /// 
 /// See <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html>
-#[derive(Debug, Default)]
-// pub struct Stts(Vec<(u32, u32)>); // (sample_count, sample_duration)
-pub struct Stts(Vec<u32>); // Instead of more compact (count, duration), 'duration' is duplicated 'count' number of times to allow easy "zip-itering" over stts + stsz in parallel.
+#[derive(Debug, BinRead)]
+#[br(big)]
+pub struct Stts {
+    _version: u8,
+    _flags: [u8; 3],
+    _no_of_entries: u32,
+    #[br(count = _no_of_entries)]
+    table: Vec<TimeToSample>
+}
+
 impl Stts {
-    pub fn new(values: Vec<u32>) -> Self {
-        Self(values)
+    /// Expand time to sample table into
+    /// discrete list of values.
+    pub fn expand(&self) -> Vec<u32> {
+        self.table.iter()
+            .flat_map(|t| vec![t.sample_duration; t.sample_count as usize])
+            .collect()
     }
+
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.table.iter()
+            .map(|t| t.sample_count as usize)
+            .sum()
     }
-    pub fn iter(&self) -> impl Iterator<Item = &u32> {
-        self.0.iter()
-    }
-    pub fn slice(&self, range: Range<usize>) -> &[u32] {
-        &self.0[range]
+
+    pub fn table(&self) -> Vec<(u32, u32)> {
+        self.table.iter()
+            .map(|t| (t.sample_count, t.sample_duration))
+            .collect()
     }
 }

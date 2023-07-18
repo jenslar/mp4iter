@@ -6,7 +6,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum Mp4Error {
     /// Converted `BinResult` error.
-    BinReadError(binread::Error),
+    BinReadError(binrw::Error),
     /// Converted `Utf8Error`.
     Utf8Error(std::string::FromUtf8Error),
     /// IO error
@@ -94,8 +94,8 @@ impl From<Mp4Error> for std::io::Error {
 }
 
 /// Converts binread::Error to FitError
-impl From<binread::Error> for Mp4Error {
-    fn from(err: binread::Error) -> Mp4Error {
+impl From<binrw::Error> for Mp4Error {
+    fn from(err: binrw::Error) -> Mp4Error {
         Mp4Error::BinReadError(err)
     }
 }

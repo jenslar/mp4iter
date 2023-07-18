@@ -1,4 +1,4 @@
-Experimental Rust crate for iterating MP4 containers. Does not and will not support any kind of media de/encoding.
+Experimental Rust crate for iterating MP4 containers, i.e. things may break. Does not and will not support any kind of media de/encoding.
 
 Usage (not yet on crates.io):
 
@@ -16,12 +16,15 @@ use std::path::Path;
 fn main() -> std::io::Result<()> {
     let mp4 = Mp4::new(Path::new("VIDEO.MP4"))?;
     
-    // Iterate over atoms. Currently returns `None` on error.
-    for atom in mp4.into_iter() {
-        println!("{atom:?}")
+    for atom_header in mp4.into_iter() {
+        println!("{atom_header:?}")
     }
-    // Print duration of MP4 (i.e. longest track)
+
+    // Derives duration for MP4 for longest track.
     println!("{:?}", mp4.duration());
+
+    // Extracts offsets for GoPro GPMF telemetry (handlre name 'GoPro MET')
+    println!("{:#?}", mp4.offsets("GoPro MET"));
 
     Ok(())
 }

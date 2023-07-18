@@ -1,10 +1,10 @@
 //! Time code entry (`tmcd`) in the Sample Description atom (`stsd`).
-//! I.e. `tmcd` not an actual atom, but part of one. It contains
+//! `tmcd` is not an actual atom, but part of one. It contains
 //! start time information that can be used to e.g. sort clips
 //! from the same chronologically (making it independent of filename),
 //! when the recording device split these up.
 
-use binread::BinRead;
+use binrw::BinRead;
 use time::{Time, ext::NumericalDuration};
 
 use crate::Offset;
@@ -18,23 +18,19 @@ use crate::Offset;
 /// 
 /// See: <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap3/qtff3.html#//apple_ref/doc/uid/TP40000939-CH205-91003>
 #[derive(Debug, Default, BinRead)]
+#[br(big)]
 pub struct Tmcd {
-    #[binread(big)]
     pub data_reference_index: u16,
     /// Should be set to 0. Currently unused.
-    #[binread(big)]
     pub(crate) _reserved1: u32,
-    #[binread(big)]
     pub flags: u32,
-    #[binread(big)]
     pub time_scale: u32,
-    #[binread(big)]
     pub frame_duration: u32,
     pub number_of_frames: u8,
     /// Should be set to 0. Currently unused.
     pub(crate) _reserved2: u8,
     /// Offsets in `mdat`
-    #[binread(ignore)]
+    #[br(ignore)]
     pub offsets: Vec<Offset>
 }
 

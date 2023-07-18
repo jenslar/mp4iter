@@ -1,6 +1,6 @@
-//! MP4 byte offset (derived from `stco` atom), size in bytes (derived from `stsz` atom),
-//! and duration (derived from `stts`atom) in milliseconds
-//! for a chunk of data.
+//! MP4 _byte offset_ (derived from `stco` atom), _size in bytes_ (derived from `stsz` atom),
+//! and _duration_ (derived from `stts`atom) in milliseconds
+//! for a chunk of interleaved data.
 
 /// MP4 byte offset (from `stco` atom), size in bytes (from `stsz` atom),
 /// and duration (from `stts`atom) in milliseconds
@@ -18,7 +18,6 @@ pub struct Offset {
     pub duration: u32
 }
 impl Offset {
-    // pub fn new(position: u43, size: u32, duration: u32) -> Self {
     pub fn new(position: u64, size: u32, duration: u32) -> Self {
         Self{position, size, duration}
     }
