@@ -84,7 +84,10 @@ impl FourCC {
             // Atom-internal data structures
             b"tmcd" => Self::Tmcd,
 
-            _ => Self::Custom(String::from_utf8_lossy(fourcc).to_string()),
+            // Does not work correctly for single-byte char above 127 (not standard ASCII)
+            // _ => Self::Custom(String::from_utf8_lossy(fourcc).to_string()),
+            // Works for ranges 0-255
+            _ => Self::Custom(fourcc.iter().map(|n| *n as char).collect::<String>()),
         }
     }
 
