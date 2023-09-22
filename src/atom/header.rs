@@ -36,6 +36,7 @@ impl AtomHeader {
         // Read 32bit atom size
         hdr.size = mp4.read_be::<u32>()? as u64;
 
+
         let string = mp4.read_string(4)?;
         hdr.name = FourCC::from_str(&string);
 
@@ -43,6 +44,10 @@ impl AtomHeader {
         // following directly after FourCC as new size if so
         if hdr.size == 1 {
             hdr.size = mp4.read_be::<u64>()?;
+        }
+
+        if hdr.size == 0 {
+            return Err(Mp4Error::ZeroSizeAtom { name: hdr.name.to_string(), offset: hdr.offset })
         }
 
         hdr.next = match CONTAINER.contains(&hdr.name.to_str()) {

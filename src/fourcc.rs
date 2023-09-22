@@ -2,6 +2,8 @@
 //! See https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-56313.
 //! Some non-standard Four CC listed, stemming from e.g. GoPro MP4-files.
 
+use std::fmt::Display;
+
 /// MP4 atom Four CC.
 /// See https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-56313.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,8 +50,15 @@ pub enum FourCC {
     Custom(String)
 }
 
+impl Display for FourCC {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
 impl FourCC {
     pub fn from_slice(fourcc: &[u8]) -> Self {
+        assert_eq!(fourcc.len(), 4, "FourCC must have size 4.");
         match fourcc {
             // Atoms
             b"dinf" => Self::Dinf,

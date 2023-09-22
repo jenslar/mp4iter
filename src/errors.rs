@@ -27,6 +27,8 @@ pub enum Mp4Error {
     UnexpectedAtomSize{len: u64, offset: u64},
     /// No such atom.
     NoSuchAtom(String),
+    /// Zero size atom.
+    ZeroSizeAtom{name: String, offset: u64},
     /// MP4 ouf of bounds.
     BoundsError((u64, u64)),
     /// Filesizes of e.g. 0 sized place holders.
@@ -58,6 +60,7 @@ impl fmt::Display for Mp4Error {
             Self::AtomMismatch{got, expected} => write!(f, "Atom mismatch. Expected '{expected}', got '{got}'"),
             Self::UnexpectedAtomSize{len, offset} => write!(f, "Unexpected MP4 atom size of {len} bytes @ offset {offset}."),
             Self::NoSuchAtom(name) => write!(f, "No such atom {name}."),
+            Self::ZeroSizeAtom{name, offset} => write!(f, "Zero size atom '{name}' at offset {offset}."),
             Self::BoundsError((got, max)) => write!(f, "Bounds error: tried to read file at {got} with max {max}."),
             Self::UnexpectedFileSize(size) => write!(f, "Unexpected file size of {size} bytes."),
             Self::UnknownBaseType(bt) => write!(f, "Unknown base type {}/'{}'", bt, *bt as char),

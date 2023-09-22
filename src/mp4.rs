@@ -309,7 +309,7 @@ impl Mp4 {
         Ok(buf)
     }
 
-    /// Read `len` number of bytes to string at absolution position `pos`.
+    /// Read `len` number of bytes to string at position `pos`.
     pub fn read_string_at(&mut self, len: u64, pos: u64) -> Result<String, Mp4Error> {
         self.seek(SeekFrom::Start(pos))?;
         self.read_string(len)
@@ -359,22 +359,23 @@ impl Mp4 {
 
     /// Finds first top-level atom with specified name (FourCC).
     /// 
-    /// `Mp4::find()` will continue from current offset.
-    /// Run `Mp4::reset()` to set start offset to 0.
+    /// If `reset` is set, the search will start from the beginning of the MP4.
     pub fn find(&mut self, name: &str, reset: bool) -> Result<Option<AtomHeader>, Mp4Error> {
         if reset {
             self.reset()?;
         }
-        // TODO does not check self at current offset, only from next and on...
-        // Iterate, but set seek to next atom offset to false...
+        // !!! does not check self at current offset, only from next and on...
+        // Iterate, but set seek to next atom offset to false to be able to read
+        // the corresponding atom data after the header.
         let fourcc = FourCC::from_str(name);
-        while let Ok(header) = self.next_header(false) {
-            // if header.name.to_str() == name {
+        // want error returned when reading which 'if let Ok(hdr) = self.next_header(false)' loop
+        // won't expose
+        while self.pos()? < self.len() {
+            let header = self.next_header(false)?;
             if header.name == fourcc {
                 return Ok(Some(header))
             }
             // ... and if not the correct atom, seek to next one manually
-            // self.seek(header.next as i64)?;
             self.seek(SeekFrom::Current(header.next as i64))?;
         }
         Ok(None)
