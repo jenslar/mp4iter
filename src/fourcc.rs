@@ -1,11 +1,11 @@
 //! MP4 atom FourCC.
-//! See https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-56313.
+//! See atom type in <https://developer.apple.com/documentation/quicktime-file-format/atoms>.
 //! Some non-standard Four CC listed, stemming from e.g. GoPro MP4-files.
 
 use std::fmt::Display;
 
 /// MP4 atom Four CC.
-/// See https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-56313.
+/// See atom type in <https://developer.apple.com/documentation/quicktime-file-format/atoms>.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FourCC {
     /// Composition offset atom
@@ -16,6 +16,7 @@ pub enum FourCC {
     Edts,
     Elst,
     Ftyp,
+    Free,
     Gmhd,
     Hdlr,
     Iods,
@@ -33,6 +34,7 @@ pub enum FourCC {
     Stco,
     /// Chunk offset, 64-bit values
     Co64,
+    Sdtp,
     Stsc,
     Stsd,
     Stss,
@@ -47,7 +49,7 @@ pub enum FourCC {
     Udta,
     Vmhd,
 
-    Custom(String)
+    Custom(String),
 }
 
 impl Display for FourCC {
@@ -76,6 +78,7 @@ impl FourCC {
             b"moov" => Self::Moov,
             b"mvhd" => Self::Mvhd,
             b"smhd" => Self::Smhd,
+            b"sdtp" => Self::Sdtp,
             b"stbl" => Self::Stbl,
             b"stco" => Self::Stco,
             b"stsc" => Self::Stsc,
@@ -93,10 +96,14 @@ impl FourCC {
             // Atom-internal data structures
             b"tmcd" => Self::Tmcd,
 
-            // Does not work correctly for single-byte char above 127 (not standard ASCII)
-            // _ => Self::Custom(String::from_utf8_lossy(fourcc).to_string()),
-            // Works for ranges 0-255
-            _ => Self::Custom(fourcc.iter().map(|n| *n as char).collect::<String>()),
+            // UTF-8 does not work for single-byte char above 127
+            // but ISO8859-1 mapping works for range 128-255
+            _ => Self::Custom(
+                fourcc
+                    .iter()
+                    .map(|n| *n as char)
+                    .collect::<String>()
+                ),
         }
     }
 
@@ -121,6 +128,7 @@ impl FourCC {
             "minf" => Self::Minf,
             "moov" => Self::Moov,
             "mvhd" => Self::Mvhd,
+            "sdtp" => Self::Sdtp,
             "smhd" => Self::Smhd,
             "stbl" => Self::Stbl,
             "stco" => Self::Stco,
@@ -136,7 +144,6 @@ impl FourCC {
             "udta" => Self::Udta,
             "vmhd" => Self::Vmhd,
             "co64" => Self::Co64,
-            // "GPMF" => Self::Gpmf, // capitals in file
             _ => Self::Custom(fourcc.to_owned()),
         }
     }
@@ -149,6 +156,7 @@ impl FourCC {
             Self::Edts => "edts",
             Self::Elst => "elst",
             Self::Ftyp => "ftyp",
+            Self::Free => "free",
             Self::Gmhd => "gmhd",
             Self::Hdlr => "hdlr",
             Self::Iods => "iods",
@@ -158,6 +166,7 @@ impl FourCC {
             Self::Minf => "minf",
             Self::Moov => "moov",
             Self::Mvhd => "mvhd",
+            Self::Sdtp => "sdtp",
             Self::Smhd => "smhd",
             Self::Stbl => "stbl",
             Self::Stco => "stco",
@@ -174,41 +183,13 @@ impl FourCC {
             Self::Vmhd => "vmhd",
             Self::Co64 => "co64",
             // Self::Gpmf => "GPMF", // capitals in file
-            Self::Custom(s) => s.as_str()
+            Self::Custom(s) => s.as_str(),
         }
     }
 }
 
 impl Default for FourCC {
     fn default() -> Self {
-        Self::Custom("None".to_owned())
+        Self::Custom("Unknown".to_owned())
     }
 }
-// dinf
-// dref
-// edts
-// elst
-// ftyp
-// gmhd
-// hdlr
-// iods
-// mdat
-// mdhd
-// mdia
-// minf
-// moov
-// mvhd
-// smhd
-// stbl
-// stco
-// stsc
-// stsd
-// stss
-// stsz
-// stts
-// tkhd
-// tmcd
-// trak
-// tref
-// udta
-// vmhd

@@ -1,0 +1,11 @@
+# v0.4.0
+- BREAKING added optional position to all read methods for `Mp4Reader`, `Mp4`, and `Atom`.
+- NEW `Mp4::new()` now reads `moov` into memory (`Cursor<Vec<u8>>`) in a (naive?) attempt to raise performance by speeding up seek times for especially "spinning platter" disks.
+- NEW added `Track` struct, which represents a single track in the MP4. Convenience compilation of data from various atoms in a `trak`. Has `data()` and `timestamps()` methods, which return iterators over the samples as raw bytes and increasing timestamps, respectively, for the track.
+- NEW added methods for finding various attributes such as frame rate, time scale
+- NEW attempt to bounds check `Atom` on read (not seek).
+- NEW Added flag to store whether atom size was set as 64bit since this can not be determined after parse if atom is not of 64 bit sized (some cameras seem to exclusively use 64bit size, even for sub-64bit atom sizes)
+- FIX Three letter language code in `mdhd` atom should now be correct.
+- FIX Deriving sample offset, size, duration should now be correct.
+- FIX Fixed incorrect timing, and frame rate calculations.
+- FIX Changed and fixed how `tmcd` section (if present) inside `stsd` is read

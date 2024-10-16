@@ -1,4 +1,4 @@
-Experimental Rust crate for iterating MP4 containers, i.e. things may break. Does not and will not support any kind of media de/encoding.
+Rust crate for moving around in MP4 containers. Does not and will not support any kind of media de/encoding.
 
 Usage (not yet on crates.io):
 
@@ -14,17 +14,23 @@ use mp4iter::Mp4;
 use std::path::Path;
 
 fn main() -> std::io::Result<()> {
-    let mut mp4 = Mp4::new(Path::new("VIDEO.MP4"))?;
-    
+    let mp4 = Mp4::new(Path::new("VIDEO.MP4"))?;
+
     for atom_header in mp4.into_iter() {
         println!("{atom_header:?}")
     }
 
-    // Derives duration for longest track.
+    // Derives duration for MP4 for longest track.
     println!("{:?}", mp4.duration());
 
-    // Extracts offsets for GoPro GPMF telemetry (handler name 'GoPro MET')
-    println!("{:#?}", mp4.offsets("GoPro MET"));
+    // Extracts track data for GoPro GPMF telemetry (handle name 'GoPro MET')
+    let mut track = mp4.track("GoPro MET")?;
+    println!("{track:#?}");
+
+    // Iterate over raw sample data. Yields `Result<Cursor<Vec<u8>>, Mp4Error>>`.
+    for result in track.data() {
+        println!("{result:?});
+    }
 
     Ok(())
 }
