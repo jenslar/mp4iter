@@ -1,6 +1,5 @@
 .gitignore
 .zed
 .nova
-src/tests.rs
 target
 .DS_Store
