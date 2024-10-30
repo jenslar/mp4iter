@@ -11,7 +11,7 @@ use crate::Stco;
 /// The 64-bit equivalent of the `stco` atom.
 ///
 /// Path: `moov/trak/mdia/minf/stbl/co64`
-#[derive(Debug, Default, BinRead)]
+#[derive(Debug, Default, BinRead, Clone)]
 pub struct Co64 {
     _version: u8,
     _flags: [u8; 3],
@@ -22,10 +22,14 @@ pub struct Co64 {
 }
 
 impl Co64 {
+    /// Returns number of chunks.
+    /// (each chunk correspinds to one or more samples).
     pub fn len(&self) -> usize {
         self.no_of_entries as usize
     }
 
+    /// Returns chunk byte offsets.
+    /// (each chunk correspinds to one or more samples).
     pub fn offsets(&self) -> &[u64] {
         &self.offsets
     }

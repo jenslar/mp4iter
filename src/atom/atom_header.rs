@@ -23,8 +23,8 @@ pub struct AtomHeader {
     /// i.e. byte offset for its header,
     /// starting with 32-bit size.
     pub(crate) offset: u64,
-    // Relative offset to next atom
-    // counting from start of data load.
+    /// Relative offset to next atom
+    /// counting from start of data load.
     pub(crate) next: u64,
     /// Set to `true` if atom size specified
     /// in 64 bit area. E.g. insta360 seems to

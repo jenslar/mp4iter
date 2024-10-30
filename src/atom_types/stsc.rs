@@ -89,7 +89,6 @@ impl Stsc {
 
         let mut sum = 0;
         for chunk in self.sample_to_chunk_table.windows(2) {
-            // println!("{chunk:?}");
             let c1 = &chunk[0];
             let c2 = &chunk[1];
 
@@ -122,7 +121,6 @@ impl Stsc {
         let mut sum = 0;
         let mut offsets: Vec<(u64, u32)> = Vec::new();
         for chunk in self.sample_to_chunk_table.windows(2) {
-            println!("{chunk:?}");
             let c1 = &chunk[0];
             let c2 = &chunk[1];
 

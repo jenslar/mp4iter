@@ -1,3 +1,6 @@
+# v0.4.5
+- FIX Atom order agnostic method for deriving sample information for a track (offsets, sizes, etc). Some MP4-file seem to juggle the relevant atoms around (`stco`, `stts`, `stco`/`co64`, `stsz`).
+
 # v0.4.0
 - BREAKING added optional position to all read methods for `Mp4Reader`, `Mp4`, and `Atom`.
 - NEW `Mp4::new()` now reads `moov` into memory (`Cursor<Vec<u8>>`) in a (naive?) attempt to raise performance by speeding up seek times for especially "spinning platter" disks.

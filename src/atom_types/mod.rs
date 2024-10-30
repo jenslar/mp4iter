@@ -20,6 +20,7 @@ mod stsd;
 mod sdtp;
 mod smhd;
 mod vmhd;
+mod types;
 
 pub use dref::{Dref, DrefTable};
 pub use elst::{Elst, EditListTable};
@@ -40,3 +41,4 @@ pub use mdhd::Mdhd;
 pub use mvhd::Mvhd;
 pub use stsd::{Stsd, SampleDescription, AudioFormat, VideoFormat};
 pub use vmhd::Vmhd;
+pub(crate) use types::AtomType;

@@ -225,7 +225,7 @@ impl Mp4 {
     }
 
     /// `next` method for iterating over atoms.
-    fn next_header(
+    pub(crate) fn next_header(
         &mut self,
         seek_next: bool
     ) -> Result<AtomHeader, Mp4Error> {

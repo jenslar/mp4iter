@@ -2,12 +2,12 @@
 //! and duration (extracted from `stts`atom) in milliseconds
 //! for a chunk of interleaved data.
 
-use std::io::SeekFrom;
+use std::{collections::HashMap, io::{Seek, SeekFrom}};
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use time::Duration;
 
-use crate::{Co64, Mp4, Mp4Error};
+use crate::{atom_types::AtomType, reader::AtomReadOrigin, Co64, FourCC, Mp4, Mp4Error, TargetReader};
 
 #[derive(Debug, Default)]
 pub struct Offsets(pub(crate) Vec<Offset>);
@@ -30,7 +30,7 @@ impl Offsets {
     /// ```
     /// trak -> tkhd -> mdhd -> hdlr -> stts -> stsc -> stsz -> stco/co64
     /// ```
-    pub(crate) fn new(
+    pub(crate) fn new_old(
         mp4: &mut Mp4,
         time_scale: u32,
         time_scale_zero_ok: bool
@@ -99,6 +99,161 @@ impl Offsets {
                 let no_of_samples = match stsc.no_of_samples(i + 1) {
                     Some(n) => n,
                     None => panic!("stsc index does not exist\nlen {}\ni+1 {}\nco len {}",
+                        stsc.no_of_entries,
+                        i+1,
+                        co_len
+                    ),
+                };
+
+                // Get sample sizes in this chunk
+                // Panics on out of bounds... better to iter and use get for each sample?
+                let smp_sizes = (&stsz.sizes()[i .. i + no_of_samples as usize]).to_vec();
+
+                let mut delta = 0_u64;
+                let smp_off: Vec<u64> = smp_sizes.into_iter()
+                    .map(|s| {
+                        let offset = co + delta;
+                        delta += s as u64;
+                        offset
+                    })
+                    .collect();
+
+                Ok(smp_off)
+            })
+            .collect::<Result<Vec<Vec<u64>>, Mp4Error>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let offsets: Vec<Offset> = stts.durations()
+            .iter()
+            .zip(stsz.sizes().iter())
+            .zip(sample_offsets.iter())
+            .map(|((duration_ticks, size), position)| {
+                Offset::new(
+                    *position,
+                    *size,
+                    *duration_ticks,
+                    time_scale,
+                    time_scale_zero_ok
+                )
+            })
+            .collect();
+
+        return Ok(Self(offsets));
+    }
+
+    /// Internal. Returns a track's sample information if reader
+    /// position is at the start of a track or before the track's
+    /// `stts` atom.
+    ///
+    /// - Sample byte offset via `stsc` (samples per chunk) and `stco`/`co64` (chunk offsets)
+    /// - Sample size via `stsz` (sample sizes)
+    /// - Sample duration via `stts` (sample durations)
+    ///
+    /// Will fail or return incorrect data if reader position
+    /// is not at or before the start of the `stts` atom
+    /// (sample to time) for a track.
+    ///
+    /// This implementation is agnostic to the order of the sample atoms.
+    /// Some MP4-files seem to move these around (specifically MP4 with
+    /// `moov` atom before `mdat` atom?)
+    ///
+    /// The common atom order within a track, i.e. the `trak` container atom
+    /// is usually, but critically, **not always**:
+    /// ```
+    /// trak -> tkhd -> mdhd -> hdlr -> stts -> stsc -> stsz -> stco/co64
+    /// ```
+    pub(crate) fn new(
+        mp4: &mut Mp4,
+        time_scale: u32,
+        time_scale_zero_ok: bool
+    ) -> Result<Self, Mp4Error> {
+        // Have chunk offsets via stco atom, but offsets for
+        // individual sample need to be calculated using
+        // stsc atom.
+
+        // 1. Find stbl container atom, container so no need to seek to next when found
+        let stbl_header = match mp4.reader.find_header(&TargetReader::Moov, "stbl", false)? {
+            Some(hdr) => hdr,
+            None => return Err(Mp4Error::NoSuchAtom("stbl".to_string())),
+        };
+
+        let mut offset_atoms: HashMap<&str, AtomType> = HashMap::new();
+
+        loop {
+            // Read "raw" atom at current position with moov reader
+            let mut atom = mp4.atom(&TargetReader::Moov, AtomReadOrigin::None)?;
+
+            let rel_pos_next = atom.header.next;
+
+            // Match FourCC for each atom, ignore any that are not required
+            // to derive track sample information.
+            // Break if 4 of the below have been found, since only one of
+            // each - and either stco or co64 - can exist for each track.
+            match atom.header.name().to_str() {
+                // Only one of stco or co64 can exist in a single track, insert with same same key
+                "stco" => {offset_atoms.insert("stco", AtomType::Stco(atom.stco()?));},
+                "co64" => {offset_atoms.insert("stco", AtomType::Co64(atom.co64()?));},
+
+                // the following three are required
+                "stsc" => {offset_atoms.insert("stsc", AtomType::Stsc(atom.stsc()?));},
+                "stsz" => {offset_atoms.insert("stsz", AtomType::Stsz(atom.stsz()?));},
+                "stts" => {offset_atoms.insert("stts", AtomType::Stts(atom.stts()?));},
+
+                // If next track is encountered we've read too far so return error
+                "trak" => return Err(Mp4Error::SampleOffsetError),
+
+                // Not a relevant atom, seek to next
+                _ => {mp4.seek_moov(SeekFrom::Current(i64::try_from(rel_pos_next)?))?;},
+            }
+
+            // if stco, stts, stsz or stco/co64 have been found break loop
+            if offset_atoms.len() == 4 {
+                break
+            }
+        }
+
+        // Get sample durations from stts/sample to time atom.
+        let stts = match offset_atoms.get("stts") {
+            Some(AtomType::Stts(a)) => a,
+            _ => return Err(Mp4Error::NoSuchAtom("stts".into())) // .durations();
+        };
+
+        // Get sample to chunk atom (number of samples per chunk)
+        let stsc = match offset_atoms.get("stsc") {
+            Some(AtomType::Stsc(a)) => a,
+            _ => return Err(Mp4Error::NoSuchAtom("stsc".into())) // .durations();
+        };
+
+        // Get sample sizes from stsz/sample to size atom.
+        let stsz = match offset_atoms.get("stsz") {
+            Some(AtomType::Stsz(a)) => a,
+            _ => return Err(Mp4Error::NoSuchAtom("stsz".into())) // .durations();
+        };
+
+        // Get either stco or co64 (whichever present), but return only co64
+        let co64 = match offset_atoms.get("stco") {
+            Some(AtomType::Stco(a)) => Co64::from(a.to_owned()),
+            Some(AtomType::Co64(a)) => a.to_owned(),
+            _ => return Err(Mp4Error::NoSuchAtom("stco".into())) // .durations();
+        };
+
+        let co_len = co64.offsets().len();
+
+        // Convert chunk offsets to sample offsets by merging stsc, stco, stsz
+        // let sample_offsets: Vec<u64> = chunk_offsets
+        let sample_offsets: Vec<u64> = co64.offsets()
+            // .into_iter()
+            .into_par_iter()
+            .enumerate()
+            .map(|(i, co)| {
+                // Get number of samples in this chunk
+                // 1-based indexing, i.e. first chunk in stsc's
+                // sample-to-chunk table will have index = 1.
+                let no_of_samples = match stsc.no_of_samples(i + 1) {
+                    Some(n) => n,
+                    None => panic!("stsc index does not exist\nlen    {}\ni+1    {}\nco len {}",
                         stsc.no_of_entries,
                         i+1,
                         co_len

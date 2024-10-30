@@ -35,6 +35,7 @@ pub mod consts;
 pub mod support;
 pub mod track;
 pub mod errors;
+pub mod tests;
 
 // Internal reader
 pub(crate) mod reader;

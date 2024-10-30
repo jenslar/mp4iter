@@ -22,6 +22,7 @@ pub enum Mp4Error {
     SampleRateExtractionError,
     VideoFormatExtractionError,
     AudioFormatExtractionError,
+    SampleOffsetError,
     MissingHandlerName,
     /// Seek mismatch.
     OffsetMismatch{got: u64, expected: u64},
@@ -76,6 +77,7 @@ impl fmt::Display for Mp4Error {
             Self::SampleRateExtractionError => write!(f, "Failed to determine audio sample rate."),
             Self::VideoFormatExtractionError => write!(f, "Failed to determine video format."),
             Self::AudioFormatExtractionError => write!(f, "Failed to determine audio format."),
+            Self::SampleOffsetError => write!(f, "Failed to extract sample offsets for track."),
             Self::AtomMismatch{got, expected} => write!(f, "Atom mismatch. Expected '{expected}', got '{got}'"),
             Self::UnexpectedAtomSize{len, offset} => write!(f, "Unexpected MP4 atom size of {len} bytes @ offset {offset}."),
             Self::NoSuchAtom(name) => write!(f, "No such atom {name}."),

@@ -6,7 +6,7 @@ use std::fmt::Display;
 
 /// MP4 atom Four CC.
 /// See atom type in <https://developer.apple.com/documentation/quicktime-file-format/atoms>.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FourCC {
     /// Composition offset atom
     Ctts,
@@ -92,7 +92,7 @@ impl FourCC {
             b"udta" => Self::Udta,
             b"vmhd" => Self::Vmhd,
             b"co64" => Self::Co64,
-            
+
             // Atom-internal data structures
             b"tmcd" => Self::Tmcd,
 
