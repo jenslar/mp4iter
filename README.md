@@ -29,7 +29,7 @@ fn main() -> std::io::Result<()> {
 
     // Iterate over raw sample data. Yields `Result<Cursor<Vec<u8>>, Mp4Error>>`.
     for result in track.data() {
-        println!("{result:?});
+        println!("{result:?}");
     }
 
     Ok(())
