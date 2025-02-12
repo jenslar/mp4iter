@@ -11,11 +11,12 @@
 use binrw::BinRead;
 use time::{Time, ext::NumericalDuration};
 
-use crate::{Offset, Offsets};
+use crate::{SampleOffset, SampleOffsets};
 
 /// Time code entry (`tmcd`). Part of the sample description atom (`stsd`).
 ///
-/// > Note: Distinguish from `tmcd` with the same FourCC located at `moov/tref/tmcd`.
+/// > Note: Distinguish from the optional `tmcd` atom with
+/// > the same FourCC located at `moov/tref/tmcd`.
 ///
 /// `tmcd` is not an atom in the main tree, but part of one. Contains
 /// start time information that can be used to e.g. sort clips chronologically
@@ -34,7 +35,7 @@ pub struct Tmcd {
     pub(crate) _reserved2: u8,
     #[br(ignore)]
     // pub(crate) offsets: Vec<Offset>
-    pub(crate) offsets: Offsets
+    pub(crate) offsets: SampleOffsets // !!! REMOVE, HANDLE VIA TRACK OFFSETS INSTEAD
 }
 
 impl Tmcd {
@@ -50,7 +51,7 @@ impl Tmcd {
         self.number_of_frames
     }
 
-    pub fn offsets(&self) -> impl Iterator<Item = &Offset> {
+    pub fn offsets(&self) -> impl Iterator<Item = &SampleOffset> {
         self.offsets.iter()
     }
 

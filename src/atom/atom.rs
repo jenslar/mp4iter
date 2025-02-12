@@ -111,19 +111,6 @@ impl <'a> Atom<'a> {
             pos,
             Some((self.min(), self.max()))
         )
-        // match pos {
-        //     Some(p) => self.reader.read_one(
-        //         &self.target,
-        //         endian,
-        //         p,
-        //         Some((self.min(), self.max()))
-        //     ),
-        //     None => self.reader.read_one(
-        //         &self.target,
-        //         endian,
-        //         Some((self.min(), self.max()))
-        //     )
-        // }
     }
 
     pub fn read_many<T>(
@@ -143,21 +130,6 @@ impl <'a> Atom<'a> {
             pos,
             Some((self.min(), self.max()))
         )
-        // match pos {
-        //     Some(p) => self.reader.read_many_at::<T>(
-        //         &self.target,
-        //         endian,
-        //         n,
-        //         p,
-        //         Some((self.min(), self.max()))
-        //     ),
-        //     None => self.reader.read_many::<T>(
-        //         &self.target,
-        //         endian,
-        //         n,
-        //         Some((self.min(), self.max()))
-        //     ),
-        // }
     }
 
     /// Attempt to read `FourCC` at current position.
@@ -304,10 +276,6 @@ impl <'a> Atom<'a> {
         // (first byte in component name contains its length in bytes)
         // that ends with space \x20, whereas DJI cameras and sound handlers in old (?)
         // Apple mp4/quicktime is not counted and seems to be a null terminated string.
-        // let mut hdlr = match self.moov {
-        //     true => self.reader.moov_rdr.read_ne::<Hdlr>()?,
-        //     false => self.reader.read_ne::<Hdlr>()?
-        // };
         let mut hdlr = self.reader.read_ne::<Hdlr>(&self.target)?;
 
         // determine how many bytes left to read in atom

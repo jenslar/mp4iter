@@ -28,7 +28,6 @@
 
 pub mod mp4;
 pub mod fourcc;
-pub mod offset;
 pub mod atom;
 pub mod atom_types;
 pub mod consts;
@@ -45,7 +44,7 @@ pub mod iterator;
 
 pub use mp4::Mp4;
 pub use fourcc::FourCC;
-pub use offset::{Offset, Offsets};
+pub use track::{Track, TrackAttributes, TrackIdentifier, Sample, SampleOffsets, SampleOffset};
 pub use atom::{Atom, AtomHeader};
 pub use atom_types::{
     Co64,

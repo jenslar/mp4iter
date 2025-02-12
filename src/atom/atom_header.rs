@@ -1,6 +1,6 @@
-use std::ops::{Range, RangeBounds};
+use std::ops::Range;
 
-use crate::{FourCC, Mp4Error, CONTAINER};
+use crate::{FourCC, CONTAINER};
 
 /// Atom header.
 /// 8 or 16 bytes in MP4, depending on whether
@@ -26,12 +26,13 @@ pub struct AtomHeader {
     /// Relative offset to next atom
     /// counting from start of data load.
     pub(crate) next: u64,
-    /// Set to `true` if atom size specified
-    /// in 64 bit area. E.g. insta360 seems to
-    /// specify all sizes as 64 bit regardless
-    /// of actual atom size. I.e. 32bit size
-    /// is set to `1`. But this info can not
-    /// be derived post-parse.
+    /// Set to `true` if atom size is specified
+    /// in 64 bit area (i.e. 32bit size
+    /// is set to `1`). Some cameras, such as
+    /// insta360, seem to store all sizes
+    /// in 64 bit area regardless
+    /// of actual atom size. However this information
+    /// can not be derived post-parse.
     pub(crate) size_64bit: bool
 }
 

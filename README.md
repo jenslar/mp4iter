@@ -27,9 +27,15 @@ fn main() -> std::io::Result<()> {
     let mut track = mp4.track("GoPro MET")?;
     println!("{track:#?}");
 
-    // Iterate over raw sample data. Yields `Result<Cursor<Vec<u8>>, Mp4Error>>`.
-    for result in track.data() {
-        println!("{result:?}");
+    // Iterate over raw sample data.
+    for (i, result) in track.samples().enumerate() {
+        let sample: Sample = result.unwrap(); // implements read + seek
+        println!("{:04} {} bytes, duration: {}, timestamp: {}",
+            i+1,
+            sample.len(),
+            sample.duration(),
+            sample.relative()
+        );
     }
 
     Ok(())

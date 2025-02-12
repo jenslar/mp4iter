@@ -44,9 +44,14 @@ use std::{
     borrow::BorrowMut, fs::File, io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom}, path::{Path, PathBuf}
 };
 
-use crate::{atom_types::Stsc, reader::AtomReadOrigin, track::{Track, TrackAttributes, TrackIdentifier}, Atom, AtomHeader, AudioFormat, Co64, Dref, Ftyp, Hdlr, Mdhd, Mp4Error, Mp4Reader, Mvhd, Offset, Offsets, ReadOption, Sdtp, Smhd, Stco, Stsd, Stss, Stsz, Stts, TargetReader, Tkhd, Tmcd, VideoFormat, Vmhd};
-use binrw::{endian::Endian, BinRead};
-use time::ext::NumericalDuration;
+use crate::{
+    atom_types::Stsc,
+    reader::AtomReadOrigin,
+    track::{Track, TrackAttributes, TrackIdentifier},
+    Atom, AtomHeader, AudioFormat, Co64, Dref, Ftyp, Hdlr, Mdhd, Mp4Error, Mp4Reader, Mvhd, SampleOffsets, ReadOption, Sdtp, Smhd, Stco, Stsd, Stss, Stsz, Stts, TargetReader, Tkhd, Tmcd, VideoFormat, Vmhd
+};
+use binrw::{endian::Endian, BinRead, BinReaderExt};
+use time::{ext::NumericalDuration};
 
 /// MP4 reader.
 #[derive(Debug)]
@@ -108,7 +113,7 @@ impl Mp4 {
     }
 
     /// New `Mp4` from path with custom buffer size
-    /// for the underlying `BufReader`.
+    /// for the underlying `BufReader` over the file.
     pub fn with_capacity(
         path: &Path,
         capacity: usize
@@ -179,7 +184,7 @@ impl Mp4 {
         self.reader.read_one(&TargetReader::File, endian, pos, None)
     }
 
-    pub fn read_many<T>(
+    pub(crate) fn read_many<T>(
         &mut self,
         n: usize,
         endian: Endian,
@@ -193,7 +198,7 @@ impl Mp4 {
     }
 
     /// Read a single byte.
-    pub fn read_byte(
+    pub(crate) fn read_byte(
         &mut self,
         pos: Option<SeekFrom>
     ) -> Result<u8, Mp4Error> {
@@ -206,7 +211,7 @@ impl Mp4 {
     /// - `ReadOption::Until(B)`: read until `B` encountered
     /// - `ReadOption::Counted`: read first byte in stream, use as byte count
     /// (i.e. `1 + n_u8` bytes will be read).
-    pub fn read_bytes(
+    pub(crate) fn read_bytes(
         &mut self,
         option: ReadOption,
         pos: Option<SeekFrom>,
@@ -336,7 +341,7 @@ impl Mp4 {
     /// Located in the `mdhd` atom in each `trak`.
     pub fn time_scale_track(&mut self, track_name: &str, reset: bool) -> Result<u32, Mp4Error> {
         // reset position to start of file
-        Ok(self.mdhd_track(track_name, reset)?.time_scale)
+        Ok(self.mdhd_track_name(track_name, reset)?.time_scale)
     }
 
     /// Returns video frame rate.
@@ -445,7 +450,7 @@ impl Mp4 {
     /// for specific track name (i.e. specific track).
     ///
     /// Path: `moov.trak[multiple].mdhd`
-    pub fn mdhd_track(&mut self, track_name: &str, reset: bool) -> Result<Mdhd, Mp4Error> {
+    pub fn mdhd_track_name(&mut self, track_name: &str, reset: bool) -> Result<Mdhd, Mp4Error> {
         if reset {
             self.reset()?;
         }
@@ -456,6 +461,27 @@ impl Mp4 {
             let hdlr = self.hdlr(false)?;
             // Only return tkhd if handler name is correct
             if hdlr.component_name() == track_name {
+                return Ok(mdhd);
+            }
+        }
+    }
+
+    /// Extract media header (`mdhd` atom)
+    /// for specific track sub type,
+    /// (e.g. video = `vide``, audio = `soun`, time code = `tmcd`).
+    ///
+    /// Path: `moov.trak[multiple].mdhd`
+    pub fn mdhd_track_subtype(&mut self, sub_type: &str, reset: bool) -> Result<Mdhd, Mp4Error> {
+        if reset {
+            self.reset()?;
+        }
+        loop {
+            // Parse tkhd first, since it precedes
+            // the hdlr atom containing the handler name.
+            let mdhd = self.mdhd(false)?;
+            let hdlr = self.hdlr(false)?;
+            // Only return tkhd if handler name is correct
+            if hdlr.component_sub_type() == sub_type {
                 return Ok(mdhd);
             }
         }
@@ -642,13 +668,31 @@ impl Mp4 {
     /// FFmpeg reports as `handler_name`.
     ///
     /// For GoPro, use `GoPro TCD` as handler name.
-    pub fn tmcd(&mut self, track_name: &str, reset: bool) -> Result<Tmcd, Mp4Error> {
-        let mdhd = self.mdhd_track(track_name, reset)?;
+    pub fn tmcd_track_name(&mut self, track_name: &str, reset: bool) -> Result<Tmcd, Mp4Error> {
+        let mdhd = self.mdhd_track_name(track_name, reset)?;
         // Loop until 'hdlr' atom with correct track name encountered.
         let mut tmcd = self.stsd(false)?.tmcd()?;
         // Find the following stts, stsc, stco atoms to generate offsets.
         // Note that time scale will be set to 1 if its actual value is 0 (invalid)
-        tmcd.offsets = Offsets::new(self, mdhd.time_scale, true)?;
+        tmcd.offsets = SampleOffsets::new(self, mdhd.time_scale, true, None)?;
+        Ok(tmcd)
+    }
+
+    /// Returns timecode data to derive start time of video.
+    ///
+    /// Note that `tmcd` is not in the main MP4 atom tree,
+    /// but contained within `stsd` and therefore can not
+    /// be located via `Mp4` find methods.
+    ///
+    /// This atom is optional and its presence depends on
+    /// what device or software produced the MP4.
+    pub fn tmcd2(&mut self, reset: bool) -> Result<Tmcd, Mp4Error> {
+        let mdhd = self.mdhd_track_subtype("tmcd", reset)?;
+        // Loop until 'hdlr' atom with correct track name encountered.
+        let mut tmcd = self.stsd(false)?.tmcd()?;
+        // Find the following stts, stsc, stco atoms to generate offsets.
+        // Note that time scale will be set to 1 if its actual value is 0 (invalid)
+        tmcd.offsets = SampleOffsets::new(self, mdhd.time_scale, true, None)?;
         Ok(tmcd)
     }
 
@@ -671,54 +715,39 @@ impl Mp4 {
     // Track
     // -----
 
-    /// Returns the `Track` with specified track name (`hdlr.component_name`).
+    // /// Returns the `Track` with specified track name (`hdlr.component_name`).
+    // ///
+    // /// Contains timestamps and offsets for byte load in `mdat` atom.
+    // pub fn track(&mut self, track_name: &str, reset: bool) -> Result<Track, Mp4Error> {
+    //     Track::from_name(self.borrow_mut(), track_name, reset)
+    // }
+
+    /// Returns the track with specified identifier, e.g.:
+    /// - `TrackIdentifier::Name("GoPro MET")` for GoPro timed metadata track.
+    /// - `TrackIdentifier::Id(2)` for the track with internal numerical ID 2 (not always continuous, e.g. 1, 2, 3, 5 is possible).
+    /// - `TrackIdentifier::SubType("vide")` for the video track.
     ///
-    /// Contains timestamps and offsets for byte load in `mdat` atom.
-    pub fn track(&mut self, track_name: &str, reset: bool) -> Result<Track, Mp4Error> {
-        Track::from_name(self.borrow_mut(), track_name, reset)
+    /// Some kinds of tracks may be present more than once, such audio if multi-languge,
+    /// or two video tracks for 360 cameras.
+    pub fn track(&mut self, identifier: TrackIdentifier, reset: bool) -> Result<Track, Mp4Error> {
+        Track::new(self.borrow_mut(), identifier, reset)
     }
 
+    /// Returns general info for all track in the MP4 file.
     pub fn track_list(&mut self, reset: bool) -> Result<Vec<TrackAttributes>, Mp4Error> {
         TrackAttributes::all(self.borrow_mut(), reset)
     }
-
-    // /// Returns track ID and name as `(track_id, name)` for all tracks.
-    // pub fn track_list(&mut self) -> Result<Vec<(u32, String)>, Mp4Error> {
-    //     // (track_id, name)
-    //     let mut track_list: Vec<(u32, String)> = Vec::new();
-    //     loop {
-    //         let mut id: Option<u32> = None;
-    //         let mut name: Option<String> = None;
-    //         match self.tkhd(false) {
-    //             Ok(tkhd) => id = Some(tkhd.track_id()),
-    //             Err(_) => (),
-    //         };
-    //         match self.hdlr(false) {
-    //             Ok(hdlr) => name = Some(hdlr.component_name().to_owned()),
-    //             Err(_) => (),
-    //         };
-    //         if let (Some(i), Some(n)) = (id, name) {
-    //             track_list.push((i, n))
-    //         } else {
-    //             // break if no id + name have been set,
-    //             // since this signals that we're past the
-    //             // last track
-    //             break
-    //         }
-    //     }
-
-    //     Ok(track_list)
-    // }
 
     /// Returns creation time of MP4.
     ///
     /// Derived from `mvhd` atom (inside `moov` atom).
     ///
-    /// Note the some recording devices that split into clips,
+    /// Note that some recording devices that split into clips,
     /// such as GoPro, may have the same start time for all clips
     /// from the same session. This depends on the exact model.
     /// For these, find the `trak` with the title `GoPro TCD` instead,
     /// and use the timecode data in there (`tmcd` entry in an `stsd` atom).
+    /// The convenience method `Mp4::time_first_frame()` returns this value.
     ///
     /// Reference `mvhd`: <https://developer.apple.com/documentation/quicktime-file-format/movie_header_atom>
     pub fn creation_time(&mut self, reset: bool) -> Result<time::PrimitiveDateTime, Mp4Error> {
@@ -740,7 +769,7 @@ impl Mp4 {
     }
 
     pub fn duration_track(&mut self, track_name: &str, reset: bool) -> Result<time::Duration, Mp4Error> {
-        let mdhd = self.mdhd_track(track_name, reset)?;
+        let mdhd = self.mdhd_track_name(track_name, reset)?;
         Ok(mdhd.duration())
     }
 
@@ -755,7 +784,7 @@ impl Mp4 {
     ///
     /// Note that some recording devices that split into clips,
     /// such as GoPro, may have the same start time for all clips
-    /// in from the same session. This depends on the exact model.
+    /// from the same session. This depends on the exact model.
     /// For these, find the `trak` with the title `GoPro TCD` instead,
     /// and use the timecode for the first frame in there
     /// (`tmcd` entry in an `stsd` atom).
@@ -767,318 +796,21 @@ impl Mp4 {
         Ok((mvhd.creation_time(), mvhd.duration()))
     }
 
-    /// Returns time since midnight as duration for first frame.
-    /// Sometimes useful for sorting clips chronologically,
-    /// when they belong to the same recording session
-    /// (when e.g. a camera splits the recording).
-    pub fn time_first_frame(&mut self, track_name: &str, reset: bool) -> Result<time::Duration, Mp4Error> {
-        let tmcd = self.tmcd(track_name, reset)?;
-        let offset = tmcd
-            .offsets
-            // .first()
-            .iter()
+    pub fn time_first_frame(&mut self, reset: bool) -> Result<time::Duration, Mp4Error> {
+        let mut track = self.track(TrackIdentifier::SubType("tmcd"), reset)?;
+
+        let number_of_frames = track.tmcd()?.number_of_frames;
+
+        // Get first sample, but return error if not found.
+        let result = track.samples()
             .nth(0)
-            .ok_or_else(|| Mp4Error::NoOffsets(track_name.to_string()))?;
+            .ok_or_else(|| Mp4Error::NoOffsets("track sub-type 'tmcd'".to_string()))?;
 
-        let pos = SeekFrom::Start(offset.position);
-        let unscaled_time = self.read_one::<u32>(Endian::Big, Some(pos))?; // exists in mdat atom, so need file reader
-
-        let duration = (unscaled_time as f64 / tmcd.number_of_frames as f64).seconds();
+        let unscaled_time: u32 = result?.read_be()?;
+        let duration = (unscaled_time as f64 / number_of_frames as f64).seconds();
 
         Ok(duration)
     }
-
-    // /// Internal. Returns chunk offsets for current `trak`.
-    // /// or `trak` closest to current position (seeking forward only).
-    // ///
-    // /// I.e. finds the next `stts` (sample to time),
-    // /// `stsz` (sample to size), `stco` (32-bit sample offsets)
-    // /// or `co64` (64-bit sample offsets), and  atoms,
-    // /// and extracts relevant data.
-    // ///
-    // /// If `time_scale_zero_ok` is `true`,
-    // /// time_scale` will be set to 1 if its real value is 0 (invalid value),
-    // /// to avoid division by zero.
-    // ///
-    // /// The order of these atoms is assumed to be consistently
-    // /// `stts -> stsz -> stco`.
-    // pub(crate) fn sample_offsets_current_pos_old(
-    //     &mut self,
-    //     time_scale: u32,
-    //     time_scale_zero_ok: bool
-    // ) -> Result<Vec<Offset>, Mp4Error> {
-    //     // Below code assumes order of 'st..' atoms to be consistent across all MP4 files.
-    //     // So far this is true, but if not, possible solution:
-    //     // find hdlr, read hdlr as atom, then inside hdlr cursor find stts etc
-
-    //     // atom order (intermediary atoms ignored):
-    //     // tkhd -> mdhd -> hdlr -> stts -> stsc -> stsz -> stco
-
-    //     let durations = self.stts(false)?.durations();
-
-    //     let samples_per_chunk = self.stsc(false)?;
-
-    //     let sizes = self.stsz(false)?.sizes().to_owned();
-
-    //     // Check if file size > 32bit limit (moov = false),
-    //     // but always output 64bit offsets
-    //     let offsets64 = match self.len() > u32::MAX as u64 {
-    //         true => {
-    //             // DJI osmo action 4 mp4 > 4GB mixing co64 and stco...?
-    //             // Before reading, store current moov reader position,
-    //             // Search for co64, then if no co64 rewind to stored pos
-    //             // and look for stco instead...
-    //             let pos = self.pos_moov()?;
-    //             match self.co64(false) {
-    //                 Ok(co64) => co64.offsets().to_owned(),
-    //                 // For files mixing stco and co64 the raised error
-    //                 // should be "no co64 found", but other errors
-    //                 // are still discarded...
-    //                 Err(_e) => {
-    //                     self.seek_moov(SeekFrom::Start(pos))?;
-    //                     Co64::from(self.stco(false)?).offsets().to_owned()
-    //                 },
-    //             }
-    //         },
-    //         false => Co64::from(self.stco(false)?).offsets().to_owned(),
-    //     };
-
-    //     println!("stts {}", durations.len());
-    //     println!("stsc {}", samples_per_chunk.len());
-    //     println!("stsz {}", sizes.len());
-    //     println!("stco {}", offsets64.len()); // chunk not sample offsets
-
-    //     // Assert equal size of all contained Vec:s
-    //     // assert_eq!(
-    //     //     durations.len(),
-    //     //     sizes.len(),
-    //     //     "'stts' and 'stsz' atoms differ in data size"
-    //     // );
-    //     // assert_eq!(
-    //     //     offsets64.len(),
-    //     //     sizes.len(),
-    //     //     "'stco' and 'stsz' atoms differ in data size"
-    //     // );
-
-    //     let offsets: Vec<Offset> = durations
-    //         .iter()
-    //         .zip(sizes.iter())
-    //         .zip(offsets64.iter())
-    //         .map(|((duration_ticks, size), position)| {
-    //             Offset::new(
-    //                 *position,
-    //                 *size,
-    //                 *duration_ticks,
-    //                 time_scale,
-    //                 time_scale_zero_ok
-    //             )
-    //         })
-    //         .collect();
-
-    //     return Ok(offsets);
-    // }
-
-    // /// Internal. Returns a track's sample information if reader
-    // /// position is at the start of a track or before the track's
-    // /// `stts` atom.
-    // ///
-    // /// - Sample byte offset via `stsc` (samples per chunk) and `stco` (chunk offsets)
-    // /// - Sample size via `stsz` (sample sizes)
-    // /// - Sample duration via `stts` (sample durations)
-    // ///
-    // /// Will fail or return incorrect data if reader position
-    // /// is not at or before the start of the `stts` atom
-    // /// (sample to time) for a track.
-    // ///
-    // /// Atom order within a track, i.e. the `trak` container atom
-    // /// (intermediary atoms and levels ignored):
-    // /// ```
-    // /// trak -> tkhd -> mdhd -> hdlr -> stts -> stsc -> stsz -> stco/co64
-    // /// ```
-    // pub(crate) fn sample_offsets_current_pos(
-    //     &mut self,
-    //     time_scale: u32,
-    //     time_scale_zero_ok: bool
-    // ) -> Result<Vec<Offset>, Mp4Error> {
-    //     // atom order within a track (intermediary atoms/levels ignored):
-    //     // tkhd -> mdhd -> hdlr -> stts -> stsc -> stsz -> stco
-
-    //     // Have chunk offsets via stco atom, but offsets for
-    //     // individual sample need to be calculated using
-    //     // stsc atom.
-
-    //     // Get sample durations from stts/sample to time atom.
-    //     let stts = self.stts(false)?; // .durations();
-
-    //     // Get sample to chunk atom (number of samples per chunk)
-    //     let stsc = self.stsc(false)?;
-
-    //     // Get sample sizes from stsz/sample to size atom.
-    //     let stsz = self.stsz(false)?; // .sizes();
-
-    //     // Get chunk offsets.
-    //     // Chunk offset atom may be 32 bit (stco)
-    //     // or 64 bit (co64) version, and some MP4
-    //     // seem to mix them through out the file,
-    //     // even for file sizes > 4GB (e.g. DJI Osmo Action 4).
-    //     // Solution is to always output 64 bit offsets...
-    //     let chunk_offsets = match self.len() > u32::MAX as u64 {
-    //         // 64-bit size
-    //         true => {
-    //             // Before reading, store current moov reader position,
-    //             // Search for co64, then if no co64 rewind to stored pos
-    //             // and look for stco instead...
-    //             let pos = self.pos_moov()?;
-
-    //             // !!! POTENTIAL ISSUE: only works if this is the final track?
-    //             // !!! I.e. What if the current track has stco
-    //             // !!! and the co64 for the following track is found instead...?
-    //             // !!! Instead: Only work at track/trak level and check trak
-    //             // !!! bounds? at least for user facing functions
-    //             match self.co64(false) {
-    //                 Ok(co64) => co64.offsets().to_owned(),
-    //                 // For files mixing stco and co64 the raised error
-    //                 // is probably "no co64 found", but other errors
-    //                 // are still discarded...
-    //                 Err(_e) => {
-    //                     self.seek_moov(SeekFrom::Start(pos))?;
-    //                     Co64::from(self.stco(false)?).offsets().to_owned()
-    //                 },
-    //             }
-    //         },
-    //         // 32-bit size
-    //         false => Co64::from(self.stco(false)?).offsets().to_owned(),
-    //     };
-
-    //     let co_len = chunk_offsets.len();
-
-    //     // Convert chunk offsets to sample offsets by merging stsc, stco, stsz
-    //     let sample_offsets: Vec<u64> = chunk_offsets
-    //         .into_iter()
-    //         .enumerate()
-    //         .map(|(i, co)| {
-    //             // Get number of samples in this chunk
-    //             // 1-based indexing, i.e. first chunk in stsc's
-    //             // sample-to-chunk table will have index = 1.
-    //             let no_of_samples = match stsc.no_of_samples(i + 1) {
-    //                 Some(n) => n,
-    //                 None => panic!("stsc index does not exist\nlen {}\ni+1 {}\nco len {}",
-    //                     stsc.no_of_entries,
-    //                     i+1,
-    //                     co_len
-    //                 ),
-    //             };
-
-    //             // Get sample sizes in this chunk
-    //             // Panics on out of bounds... better to iter and use get for each sample?
-    //             let smp_sizes = (&stsz.sizes()[i .. i + no_of_samples as usize]).to_vec();
-
-    //             let mut delta = 0_u64;
-    //             let smp_off: Vec<u64> = smp_sizes.into_iter()
-    //                 .map(|s| {
-    //                     let offset = co + delta;
-    //                     delta += s as u64;
-    //                     offset
-    //                 })
-    //                 .collect();
-
-    //             Ok(smp_off)
-    //         })
-    //         .collect::<Result<Vec<Vec<u64>>, Mp4Error>>()?
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-
-    //     let offsets: Vec<Offset> = stts.durations()
-    //         .iter()
-    //         .zip(stsz.sizes().iter())
-    //         .zip(sample_offsets.iter())
-    //         .map(|((duration_ticks, size), position)| {
-    //             Offset::new(
-    //                 *position,
-    //                 *size,
-    //                 *duration_ticks,
-    //                 time_scale,
-    //                 time_scale_zero_ok
-    //             )
-    //         })
-    //         .collect();
-
-    //     return Ok(offsets);
-    // }
-
-    // /// Extract byte offsets, byte sizes, and time/duration
-    // /// for track handler with specified `handler_name` ('component name' in
-    // /// 'moov.trak.hdlr' atom).
-    // ///
-    // /// E.g. use `handler_name` "GoPro MET" to locate offsets for
-    // /// interleaved GoPro GPMF data, alternatively "DJI meta" for DJI action cameras.
-    // pub(crate) fn offsets_old(
-    //     &mut self,
-    //     track_name: &str,
-    //     reset: bool
-    // ) -> Result<Vec<Offset>, Mp4Error> {
-    //     if reset {
-    //         self.reset()?;
-    //     }
-
-    //     // need time scale from mdhd for the track BUT...
-    //     let mdhd = self.mdhd_track(track_name, false)?;
-    //     // ...mdhd_track also needs to read hdlr atom
-    //     // to check track name so position is ok for
-    //     // calling offsets_at_current_pos() whereever
-    //     // the correct track is found.
-    //     // Note that time_scale will be set to 1 if its actual value
-    //     // is 0 (invalid and causes division by 0)
-    //     self.sample_offsets_current_pos(mdhd.time_scale, true)
-    // }
-
-    /// Internal. Returns sample byte offsets, byte sizes, and time/duration
-    /// for track with specified name (i.e. 'component name' in
-    /// 'moov.trak.hdlr' atom).
-    ///
-    /// E.g. use `handler_name` "GoPro MET" to locate offsets for
-    /// interleaved GoPro GPMF data, alternatively "DJI meta" for DJI action cameras.
-    pub fn offsets(
-        &mut self,
-        track_name: &str,
-        reset: bool
-    // ) -> Result<Vec<Offset>, Mp4Error> {
-    ) -> Result<Offsets, Mp4Error> {
-        if reset {
-            self.reset()?;
-        }
-
-        // need time scale from mdhd for the track BUT...
-        let mdhd = self.mdhd_track(track_name, false)?;
-        // ...mdhd_track also needs to read hdlr atom
-        // to check track name so position is ok for
-        // calling offsets_at_current_pos() whereever
-        // the correct track is found.
-        // Note that time_scale will be set to 1 if its actual value
-        // is 0 (invalid and causes division by 0)
-        // self.sample_offsets_current_pos(mdhd.time_scale, true)
-        Offsets::new(self, mdhd.time_scale, true)
-    }
-
-    // /// Returns in-memory buffers/readers as `Cursor<Vec<u8>>`
-    // /// for track with `hdlr` component name `handler name`.
-    // ///
-    // /// For use with e.g. timed, interleaved telemetry,
-    // /// such as for GoPro or DJI action cameras.
-    // ///
-    // /// For example, to return cursors for GoPro GPMF data,
-    // /// use "GoPro MET" as handler name.
-    // pub fn cursors(
-    //     &mut self,
-    //     handler_name: &str,
-    //     reset: bool,
-    // ) -> Result<Vec<Cursor<Vec<u8>>>, Mp4Error> {
-    //     self.offsets(handler_name, reset)?
-    //         .iter()
-    //         .map(|o| self.cursor(o.size as u64, Some(SeekFrom::Start(o.position))))
-    //         .collect()
-    // }
 
     /// Returns all headers for "main" tree atoms,
     /// i.e. atoms that follow
@@ -1096,12 +828,15 @@ impl Mp4 {
                     }
                 }
                 Err(err) => {
-                    println!("{err:?}");
                     return Err(err);
                 }
             }
         }
 
         Ok(hdrs)
+    }
+
+    pub fn eof(&mut self) -> Result<bool, Mp4Error>{
+        Ok(self.pos_file()? >= self.len())
     }
 }

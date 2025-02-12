@@ -26,6 +26,7 @@ impl Vmhd {
     pub fn graphics_mode(&self) -> u16 {
         self.graphics_mode
     }
+
     pub fn op_color(&self) -> &[u16; 3] {
         &self.op_color
     }

@@ -42,8 +42,8 @@ mod tests {
         // let path = PathBuf::from("/Users/jens/Desktop/DEV/humlab/elan/henrik_jens/ELAN/compose0001_h_3D_720.mp4"); // home mbp
         // let path = PathBuf::from("/Users/jens/Desktop/WORK/LANGKEY/niclas_burenhult/nb230322/GX020006.MP4"); // home mbp
         // let path = PathBuf::from("/Users/jens/Downloads/Set 1 - Mountain Bike/Set1-DJI_20230731113357_0056_D.MP4"); // home mbp
-        // let path = PathBuf::from("/Users/jens/Downloads/Set2-DJI_20230729131927_0040_D.MP4"); // home mbp
-        let path = PathBuf::from("/Users/jens/dev/TESTDATA/gpmf/GX011369_1727627152283_hero13.mp4"); // hero13
+        let path = PathBuf::from("/Users/jens/Downloads/Set2-DJI_20230729131927_0040_D.MP4"); // home mbp
+        // let path = PathBuf::from("/Users/jens/dev/TESTDATA/gpmf/GX011369_1727627152283_hero13.mp4"); // hero13
 
         println!("{}", path.display());
         let mp4_result = Mp4::new(&path);
@@ -215,16 +215,16 @@ mod tests {
             //     println!("[{}] {} {} {}", i+1, sample.first_chunk, sample.sample_description_id, sample.samples_per_chunk)
             // }
             // println!("{:#?}", stsc.expand());
-            println!("  entries {} -> summed via stco {}",
-                stsc.no_of_entries,
-                // stsc.len(stco.len())
-                stsc.len()
-            );
+            // println!("  entries {} -> summed via stco {}",
+            //     stsc.no_of_entries,
+            //     // stsc.len(stco.len())
+            //     stsc.len()
+            // );
             let sum = stsc.sample_to_chunk_table.iter()
                 .map(|t| t.samples_per_chunk as usize)
                 .sum::<usize>();
             println!("  entries {} -> summed old {sum}",
-                stsc.no_of_entries,
+                stsc.entry_count,
             );
         }
     }
@@ -297,9 +297,9 @@ mod tests {
         let aud = "SoundHandler";
         let met = "DJI meta";
 
-        let mdhd_vid = mp4.mdhd_track(vid, true);
-        let mdhd_aud = mp4.mdhd_track(aud, true);
-        let mdhd_met = mp4.mdhd_track(met, true);
+        let mdhd_vid = mp4.mdhd_track_name(vid, true);
+        let mdhd_aud = mp4.mdhd_track_name(aud, true);
+        let mdhd_met = mp4.mdhd_track_name(met, true);
 
         println!("{vid}: {mdhd_vid:?} {:?}\n", mdhd_vid.as_ref().map(|m| m.language()));
         println!("{aud}: {mdhd_aud:?}\n");
@@ -312,7 +312,8 @@ mod tests {
         // let res1 = mp4.time_first_frame("GoPro H.265", false); // no tmcd in gogpro video track
         // println!("{:?}", res1);
         // assert!(res1.is_ok());
-        let res2 = mp4.time_first_frame("GoPro TCD", false);
+        // let res2 = mp4.time_first_frame("GoPro TCD", false);
+        let res2 = mp4.time_first_frame(false);
         println!("{:?}", res2);
         assert!(res2.is_ok());
     }
@@ -417,7 +418,7 @@ mod tests {
         // let name = "TimeCodeHandler"; // DJI_20231202082048_0345_D.MP4
         let name = "GoPro TCD"; // GoPro
                                 // let result = mp4.tmcd2(name);
-        let result = mp4.tmcd(name, false);
+        let result = mp4.tmcd_track_name(name, false);
         assert!(result.is_ok());
         println!("{:#?}", result.unwrap());
     }
@@ -528,10 +529,11 @@ mod tests {
     fn track_single() {
         let mut mp4 = get_mp4();
         // let name = "DJI meta";
-        let name = "GoPro MET";
+        // let name = "GoPro MET";
+        let name = "GoPro H.265";
         // let name = "GoPro AVC";
         // let name = "GoPro H.265";
-        let res = mp4.track(name, false);
+        let res = mp4.track(crate::TrackIdentifier::Name(name), false);
         if res.is_err() {
             println!("{res:?}");
         }
@@ -540,10 +542,10 @@ mod tests {
         // println!("{track:#?}");
 
         // iter read raw data
-        for (i, result) in track.data().enumerate() {
+        for (i, result) in track.samples().enumerate() {
             assert!(result.is_ok(), "Failed to read track data");
-            let data = result.unwrap();
-            println!("{:04} {} bytes", i+1, data.get_ref().len())
+            let sample = result.unwrap();
+            println!("{:04} {} bytes {} dur {} rel", i+1, sample.len(), sample.duration(), sample.relative())
         }
     }
 
@@ -555,8 +557,10 @@ mod tests {
         //     println!("{res:?}");
         // }
         assert!(res.is_ok(), "Failed to extract track info");
-        for track in res.unwrap().iter() {
-            println!("{} {}", track.name(), track.offsets.len());
+        if let Ok(tracklist) = res {
+            for track in tracklist.iter() {
+                println!("{} {}", track.name(), track.offsets.len());
+            }
         }
     }
 
@@ -673,11 +677,16 @@ mod tests {
         // let hdlr_name = "GoPro AVC"; // debug info ???
         // let hdlr_name = "GoPro MET"; // debug info ???
                                      // let hdlr_name = "TimeCodeHandler"; // only 4 bytes
-        let offsets = mp4.offsets(hdlr_name, false).unwrap();
 
-        for (i, o) in offsets.iter().enumerate() {
-            println!("{:6} {hdlr_name} {o:?}", i+1)
+        let result = mp4.track(crate::TrackIdentifier::Name(hdlr_name), false);
+        assert!(result.is_ok());
+
+        if let Ok(track) = result {
+            for (i, o) in track.offsets().enumerate() {
+                println!("{:6} {hdlr_name} {o:?}", i+1)
+            }
         }
+
         println!("{}", mp4.path().display())
     }
 
@@ -693,10 +702,16 @@ mod tests {
         // let hdlr_name = "GoPro AVC"; // debug info ???
         // let hdlr_name = "GoPro MET"; // debug info ???
                                      // let hdlr_name = "TimeCodeHandler"; // only 4 bytes
-        let offsets = mp4.offsets(hdlr_name, false).unwrap();
+        // let offsets = mp4.offsets(hdlr_name, false).unwrap();
 
-        for (i, o) in offsets.iter().enumerate() {
-            println!("{:6} {hdlr_name} {o:?}", i+1)
+        let result = mp4.track(crate::TrackIdentifier::Name(hdlr_name), false);
+
+        assert!(result.is_ok());
+
+        if let Ok(track) = result {
+            for (i, o) in track.offsets().enumerate() {
+                println!("{:6} {hdlr_name} {o:?}", i+1)
+            }
         }
         println!("{}", mp4.path().display())
     }

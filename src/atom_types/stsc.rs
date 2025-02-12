@@ -15,8 +15,10 @@ use binrw::BinRead;
 pub struct Stsc {
     pub(crate) version: u8,
     pub(crate) flags: [u8; 3],
-    pub(crate) no_of_entries: u32,
-    #[br(count = no_of_entries)]
+    // pub(crate) no_of_entries: u32,
+    // #[br(count = no_of_entries)]
+    pub(crate) entry_count: u32,
+    #[br(count = entry_count)]
     pub(crate) sample_to_chunk_table: Vec<SampleToChunk>,
 }
 
@@ -28,11 +30,11 @@ impl Stsc {
     /// > atom starts on 1,
     /// > so `chunk_index` is also a 1-based index,
     /// > exactly as the MP4 specification states.
-    pub fn no_of_samples(&self, chunk_index: usize) -> Option<u32> {
+    pub fn sample_count(&self, chunk_index: usize) -> Option<u32> {
 
         // Return early if only one entry, since this entry
         // is true for the entire track...
-        if self.no_of_entries == 1 {
+        if self.entry_count == 1 {
             if let Some(stc) = self.sample_to_chunk_table.first() {
                 return Some(stc.samples_per_chunk)
             }
@@ -40,7 +42,7 @@ impl Stsc {
 
         // instead of returning early,
         // add variable to be able to do last check
-        let mut no_of_smp = None;
+        let mut smp_count = None;
 
         // iterate one step at a time, but returning two tables,
         // then check if 'chunk_index' is within range of
@@ -55,79 +57,45 @@ impl Stsc {
             let s2c2 = &s2chunks[1];
 
             if (s2c1.first_chunk as usize .. s2c2.first_chunk as usize).contains(&chunk_index) {
-                no_of_smp = Some(s2c1.samples_per_chunk);
+                smp_count = Some(s2c1.samples_per_chunk);
             }
         }
 
         // Check if 'chunk_index' is larger than 'first_chunk'
         // in last sample to chunk table, since all remaining
         // chunk for the track chunks must have this number of samples
-        if no_of_smp.is_none() {
+        if smp_count.is_none() {
             if let Some(last) = self.sample_to_chunk_table.last() {
                 if chunk_index >= last.first_chunk as usize {
-                    no_of_smp = Some(last.samples_per_chunk);
+                    smp_count = Some(last.samples_per_chunk);
                 }
             }
         }
 
-        no_of_smp
+        smp_count
     }
 
-    /// Returns total number of samples
-    pub fn len(
-        &self,
-    ) -> usize {
-        // // If each chunk only contains a single sample
-        // if self.sample_to_chunk_table.len() == 1 {
-        //     return number_of_chunks
-        // }
+    // /// Returns a list for individual sample offsets and sizes as
+    // /// a vector of tuples `(ABSOLUTE_BYTE_OFFSET, BYTE_SIZE)`.
+    // ///
+    // /// `stsz` (sample size atom) contains sample sizes for the track,
+    // /// `stco` (32 bit) or `co64` (64 bit) contain absolute chunk offsets.
+    // pub fn sample_offsets(
+    //     &self,
+    //     chunk_offsets: &[u64],
+    //     sample_sizes: &[u32]
+    // ) -> Vec<(u64, u32)> {
+    //     let len = self.sample_to_chunk_table.len();
+    //     let mut sum = 0;
+    //     let mut offsets: Vec<(u64, u32)> = Vec::new();
+    //     for chunk in self.sample_to_chunk_table.windows(2) {
+    //         let c1 = &chunk[0];
+    //         let c2 = &chunk[1];
 
-        // !!! not correct, missing information
-        // !!! number of chunks required, since
-        // !!! last chunk table stretches to the end,
-        // !!! not just the first chunk specified.
-
-        let mut sum = 0;
-        for chunk in self.sample_to_chunk_table.windows(2) {
-            let c1 = &chunk[0];
-            let c2 = &chunk[1];
-
-            // sum += (c2.first_chunk - c1.first_chunk) as usize;
-            let delta = (c2.first_chunk - c1.first_chunk) as usize * c1.samples_per_chunk as usize;
-            // println!("{delta}");
-            sum += delta;
-        }
-
-        // Add final entry not caught by .windows()
-        sum += self.sample_to_chunk_table
-            .last()
-            .unwrap()
-            .samples_per_chunk as usize;
-
-        sum // will be 0 for files with only 1 sample/chunk
-    }
-
-    /// Returns a list for individual sample offsets and sizes as
-    /// a vector of tuples `(ABSOLUTE_BYTE_OFFSET, BYTE_SIZE)`.
-    ///
-    /// `stsz` (sample size atom) contains sample sizes for the track,
-    /// `stco` (32 bit) or `co64` (64 bit) contain absolute chunk offsets.
-    pub fn samples(
-        &self,
-        chunk_offsets: &[u64],
-        sample_sizes: &[u32]
-    ) -> Vec<(u64, u32)> {
-        let len = self.sample_to_chunk_table.len();
-        let mut sum = 0;
-        let mut offsets: Vec<(u64, u32)> = Vec::new();
-        for chunk in self.sample_to_chunk_table.windows(2) {
-            let c1 = &chunk[0];
-            let c2 = &chunk[1];
-
-            sum += c2.first_chunk - c1.first_chunk;
-        }
-        offsets
-    }
+    //         sum += c2.first_chunk - c1.first_chunk;
+    //     }
+    //     offsets
+    // }
 }
 
 #[derive(Debug, BinRead)]

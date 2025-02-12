@@ -1,7 +1,7 @@
 use std::{
     borrow::BorrowMut,
     fs::File,
-    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom}, ops::Range,
+    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom},
 };
 
 use binrw::{BinRead, BinReaderExt, Endian};
@@ -252,8 +252,8 @@ impl Mp4Reader {
         Ok(val)
     }
 
-    /// Read multiple bytes at current position in target stream
-    /// using `ReadOption` to control reading behaviour:
+    /// Read multiple bytes at current or optional position
+    /// in target stream using `ReadOption` to control reading behaviour:
     /// - `ReadOption::Sized(N)`: read `N` bytes
     /// - `ReadOption::Until(B)`: read until sentinel `B` encountered
     /// - `ReadOption::Counted`: read first byte in stream, use as byte count
@@ -418,7 +418,7 @@ impl Mp4Reader {
     }
 
     /// Reads `len` bytes
-    /// into `Cursor<Vec<u8>>`.
+    /// into a memory buffer with the shape `Cursor<Vec<u8>>`.
     ///
     /// Note that the `mdat` atom may be many GB in size.
     pub(crate) fn cursor(
@@ -437,6 +437,9 @@ impl Mp4Reader {
     }
 
     /// Reads FourCC at current position.
+    ///
+    /// Does not verify that current position
+    /// is at the start of a FourCC.
     pub(crate) fn fourcc(
         &mut self,
         target: &TargetReader
@@ -535,7 +538,7 @@ impl Mp4Reader {
     /// encountered atom with specified FourCC.
     ///
     /// Note that some atom types may occur more than once (e.g. `trak` and its child atoms).
-    pub fn find_atom2(
+    fn find_atom2(
         &mut self,
         target: &TargetReader,
         fourcc: &str,
@@ -616,7 +619,7 @@ impl Mp4Reader {
     /// Returns `Ok(None)` if atom with FourCC `sentinel` is encountered. E.g.
     /// if searching for `stco`, and encounters next `trak` (avoiding
     /// the `stco` atom for the next track to be returned)
-    pub fn find_header2(
+    fn find_header2(
         &mut self,
         target: &TargetReader,
         fourcc: &str,

@@ -2,7 +2,7 @@
 //! See atom type in <https://developer.apple.com/documentation/quicktime-file-format/atoms>.
 //! Some non-standard Four CC listed, stemming from e.g. GoPro MP4-files.
 
-use std::fmt::Display;
+// use std::fmt::Display;
 
 use crate::AtomHeader;
 
@@ -11,7 +11,7 @@ use super::{Co64, Ctts, Dref, Elst, Ftyp, Hdlr, Mdhd, Mvhd, Sdtp, Smhd, Stco, St
 /// MP4 atom Four CC.
 /// See atom type in <https://developer.apple.com/documentation/quicktime-file-format/atoms>.
 #[derive(Debug)]
-pub enum AtomType {
+pub(crate) enum AtomType {
     /// Composition offset atom
     Ctts(Ctts),
     /// Data Information Atoms
@@ -65,7 +65,7 @@ pub enum AtomType {
 //     }
 // }
 
-impl AtomType {
+// impl AtomType {
     // pub fn from_slice(fourcc: &[u8]) -> Self {
     //     assert_eq!(fourcc.len(), 4, "FourCC must have size 4.");
     //     match fourcc {
@@ -193,7 +193,7 @@ impl AtomType {
     //         Self::Custom(s) => s.as_str(),
     //     }
     // }
-}
+// }
 
 // impl Default for FourCC {
 //     fn default() -> Self {

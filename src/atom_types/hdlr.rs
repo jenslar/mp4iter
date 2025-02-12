@@ -6,7 +6,7 @@
 
 use binrw::BinRead;
 
-use crate::support::chars_from_bytes;
+use crate::support::string_from_bytes;
 
 /// Handler reference atom (`hdlr`)
 ///
@@ -20,12 +20,13 @@ pub struct Hdlr {
     /// - `mhlr`: media handler
     /// - `dhlr`: data handler
     /// - `[0, 0, 0, 0]` (DJI Osmo)
-    #[br(map(|data: [u8; 4]| chars_from_bytes(data)))]
-    pub(crate) component_type: [char; 4],
+    #[br(map(|data: [u8; 4]| string_from_bytes(data)))]
+    pub(crate) component_type: String,
     /// Four CC for the type of media or data handler
-    #[br(map(|data: [u8; 4]| chars_from_bytes(data)))]
-    pub(crate) component_sub_type: [char; 4],
-    // pub component_sub_type: [u8; 4],
+    // #[br(map(|data: [u8; 4]| chars_from_bytes(data)))]
+    // pub(crate) component_sub_type: [char; 4],
+    #[br(map(|data: [u8; 4]| string_from_bytes(data)))]
+    pub(crate) component_sub_type: String,
     /// Reserved, should be set to 0.
     pub(crate) component_manufacturer: u32,
     /// Reserved, should be set to 0.
@@ -48,23 +49,24 @@ impl Hdlr {
     /// Should be either `mhlr` (media handler),
     /// or `dhlr` (data handler).
     ///
-    /// See: <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-BBCGFGJG>
-    pub fn component_type(&self) -> String {
-        self.component_type.iter()
-            .map(|n| *n as char)
-            .collect()
+    /// See: <https://developer.apple.com/documentation/quicktime-file-format/handler_reference_atom/component_subtype>
+    // pub fn component_type(&self) -> String {
+    pub fn component_type(&self) -> &str {
+        self.component_type.as_str()
     }
 
 
     /// Returns component sub type as `String`.
-    /// Should be either `mhlr` (media handler),
-    /// or `dhlr` (data handler).
     ///
-    /// See: <https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/QTFFChap2/qtff2.html#//apple_ref/doc/uid/TP40000939-CH204-BBCGFGJG>
-    pub fn component_sub_type(&self) -> String {
-        self.component_sub_type.iter()
-            .map(|n| *n as char)
-            .collect()
+    /// Exmples of track sub types:
+    /// - `vide` = video
+    /// - `soun` = audio
+    /// - `subt` = subtitles
+    ///
+    /// See: <https://developer.apple.com/documentation/quicktime-file-format/handler_reference_atom/component_subtype>
+    // pub fn component_sub_type(&self) -> String {
+    pub fn component_sub_type(&self) -> &str {
+        self.component_sub_type.as_str()
     }
 
     pub fn component_manufacturer(&self) -> u32 {

@@ -15,6 +15,17 @@ use time::{self, PrimitiveDateTime, Month};
 /// - `dinf`: moov.trak.mdia.minf.dinf
 /// - `stbl`: moov.trak.mdia.minf.stbl, contains timing (stts), offsets (stco)
 /// - `udta`: moov.udta, may contain custom data, specific to the device
+// pub const CONTAINER: [&'static str; 9] = [
+//     "moov",
+//     "trak",
+//     "tref",
+//     "edts",
+//     "mdia",
+//     "minf",
+//     "dinf",
+//     "stbl",
+//     "udta",
+// ];
 pub const CONTAINER: [&'static str; 9] = [
     "moov",
     "trak",
@@ -25,6 +36,9 @@ pub const CONTAINER: [&'static str; 9] = [
     "dinf",
     "stbl",
     "udta",
+    // "hdlr",
+    // "ilst", // sometimes in wav files, in DJI MP4 files udta
+    // "meta", // in DJI MP4 files udta and main tree, may raise errors
 ];
 
 /// Time zero for MP4 containers. Midnight January 1, 1904.

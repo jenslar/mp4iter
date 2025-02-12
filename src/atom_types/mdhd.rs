@@ -31,14 +31,12 @@ pub struct Mdhd {
     /// to derive a value in seconds.
     pub(crate) duration: u32,
     /// Specifies the language code for this media.
-    // pub(crate) language: LangaugeCode, // i16 is a guess taken from max value in language code enumerations
-    // pub(crate) language: LangaugeCode, // i16 is a guess taken from max value in language code enumerations
-    // pub(crate) language: [u8; 3], // iso spec states [u8; 3], but raises off by one error for atom upper bound
-    // i16 errors out on ~/Desktop/DEV/humlab/elan/henrik_jens/ELAN/compose0001_h_3D_720.mp4 (home mbp)
-    // pub(crate) language: LangaugeCode, // i16 was a guess taken from max value in language code enumerations
-    // 1 bit pad 0 then [u5; 3]
+    /// Stored as three unsigned 5bit integers.
+    /// Initially reads value as BE u16.
+    /// Most significant bit is padding set to 0
+    /// then follows `[u5; 3]`.
     #[br(map = |data: u16| derive_language_code(data))]
-    pub(crate) language: String, // i16 was a guess taken from max value in language code enumerations
+    pub(crate) language: String,
     pub(crate) quality: u16,
 }
 
@@ -79,7 +77,7 @@ impl Mdhd {
 }
 
 /// Derive three letter ISO639-2/T language code.
-/// 
+///
 /// Packed in 16 bits `X u5 u5 u5`:
 /// - most significant bit is padding (BE so left most)
 /// - 1 `u5` + `0x60`

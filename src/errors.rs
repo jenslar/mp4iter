@@ -2,6 +2,8 @@
 
 use std::{fmt, num::TryFromIntError};
 
+use crate::TrackIdentifier;
+
 #[derive(Debug)]
 pub enum Mp4Error {
     /// Converted `BinResult` error.
@@ -35,6 +37,8 @@ pub enum Mp4Error {
     UnexpectedAtomSize{len: u64, offset: u64},
     /// No such atom.
     NoSuchAtom(String),
+    /// Track with specified name/ID not found.
+    NoSuchTrack(String),
     /// Zero size atom.
     ZeroSizeAtom{name: String, offset: u64},
     /// Atom ouf of bounds.
@@ -80,7 +84,8 @@ impl fmt::Display for Mp4Error {
             Self::SampleOffsetError => write!(f, "Failed to extract sample offsets for track."),
             Self::AtomMismatch{got, expected} => write!(f, "Atom mismatch. Expected '{expected}', got '{got}'"),
             Self::UnexpectedAtomSize{len, offset} => write!(f, "Unexpected MP4 atom size of {len} bytes @ offset {offset}."),
-            Self::NoSuchAtom(name) => write!(f, "No such atom {name}."),
+            Self::NoSuchAtom(name) => write!(f, "No such atom '{name}'."),
+            Self::NoSuchTrack(name) => write!(f, "No such track '{name}'."),
             Self::ZeroSizeAtom{name, offset} => write!(f, "Zero size atom '{name}' at offset {offset}."),
             Self::BoundsError(got, start, end) => write!(f, "Bounds error: position {got} is outside boundaries {start} - {end}."),
             Self::UnexpectedFileSize(size) => write!(f, "Unexpected file size of {size} bytes."),

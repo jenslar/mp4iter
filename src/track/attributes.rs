@@ -1,6 +1,6 @@
 use time::{Duration, PrimitiveDateTime, ext::NumericalDuration};
 
-use crate::{Mp4, Mp4Error, Offset, Offsets};
+use crate::{AudioFormat, Mp4, Mp4Error, SampleOffset, SampleOffsets, Tmcd, VideoFormat};
 
 use super::TrackIdentifier;
 
@@ -24,7 +24,7 @@ pub struct TrackAttributes {
 
     /// Track type, e.g. `soun` for an audio track.
     /// hdlr.component_sub_type ([char; 4])
-    pub(crate) track_type: String,
+    pub(crate) sub_type: String,
 
     /// Track time scale.
     /// `mdhd.time_scale`
@@ -46,7 +46,7 @@ pub struct TrackAttributes {
     /// and sample durations
     /// for all samples in this track.
     // pub(crate) offsets: Vec<Offset>, // derived from stts, stsc, stsz, stco
-    pub(crate) offsets: Offsets, // derived from stts, stsc, stsz, stco
+    pub(crate) offsets: SampleOffsets, // derived from stts, stsc, stsz, stco
 }
 
 impl TrackAttributes {
@@ -65,26 +65,35 @@ impl TrackAttributes {
 
             // Parse tkhd + mdhd first, since these precede
             // the hdlr atom containing the handler/track name.
-            let tkhd = mp4.tkhd(false)?;
+            let tkhd = match mp4.tkhd(false) {
+                Ok(atom) => atom,
+                Err(_err) => return Err(Mp4Error::NoSuchTrack(identifier.to_string())),
+            };
             let track_id = TrackIdentifier::Id(tkhd.track_id());
             let mdhd = mp4.mdhd(false)?;
             let hdlr = mp4.hdlr(false)?;
+            let track_subtype = TrackIdentifier::SubType(hdlr.component_sub_type());
             let track_name = TrackIdentifier::Name(hdlr.component_name());
 
+            // Find and read past header for container atom stbl (sample table box)
+            // which is the correct position for finding/reading offsets.
+            // Note that atom order in the sample table box is only recommended.
+            let _ = mp4.find_header("stbl", false)?;
+
             // 2. find mdhd, hdlr that follow after
-            if identifier == track_id || identifier == track_name {
+            if identifier == track_id || identifier == track_name || identifier == track_subtype {
                 let attributes = Self {
                     name: hdlr.component_name().to_owned(),
                     id: tkhd.track_id,
                     creation_time: tkhd.creation_time(),
                     modification_time: tkhd.modification_time(),
-                    track_type: hdlr.component_sub_type(),
+                    sub_type: hdlr.component_sub_type().to_owned(),
                     time_scale: mdhd.time_scale,
                     duration: mdhd.duration,
                     width: tkhd.width(),
                     height: tkhd.height(),
                     // offsets: mp4.sample_offsets_current_pos(mdhd.time_scale, true)?
-                    offsets: Offsets::new(mp4, mdhd.time_scale, true)?
+                    offsets: SampleOffsets::new(mp4, mdhd.time_scale, true, None)?
                 };
 
                 return Ok(attributes)
@@ -115,12 +124,15 @@ impl TrackAttributes {
                 id: tkhd.track_id,
                 creation_time: tkhd.creation_time(),
                 modification_time: tkhd.modification_time(),
-                track_type: hdlr.component_sub_type(),
+                sub_type: hdlr.component_sub_type().to_owned(),
                 time_scale: mdhd.time_scale,
                 duration: mdhd.duration,
                 width: tkhd.width(),
                 height: tkhd.height(),
-                offsets: Offsets::new(mp4, mdhd.time_scale, true)?
+                // Offsets also contain stsd, since this atom
+                // is only recomended to precede
+                // the sample info atoms...
+                offsets: SampleOffsets::new(mp4, mdhd.time_scale, true, None)?
             })
         }
 
@@ -143,8 +155,9 @@ impl TrackAttributes {
         self.modification_time
     }
 
-    pub fn track_type(&self) -> &str {
-        &self.track_type
+    /// Track sub type, e.g. `vide` for a video track.
+    pub fn sub_type(&self) -> &str {
+        &self.sub_type
     }
 
     pub fn time_scale(&self) -> u32 {
@@ -169,7 +182,54 @@ impl TrackAttributes {
     }
 
     // pub fn offsets(&self) -> impl Iterator<Item = &Offset> {
-    pub fn offsets(&self) -> &[Offset] {
-        &self.offsets.0
+    pub fn offsets(&self) -> &[SampleOffset] {
+        &self.offsets.offsets
+    }
+
+    // --- BELOW VIA STSD ATOM
+
+    pub fn tmcd(&self) -> Result<Tmcd, Mp4Error> {
+        self.offsets.stsd.tmcd()
+    }
+
+    pub fn is_video(&self) -> bool {
+        self.offsets.stsd.is_video()
+    }
+
+    pub fn video_format(&self) -> Option<&VideoFormat> {
+        self.offsets.stsd.video_format()
+    }
+
+    pub fn is_audio(&self) -> bool {
+        self.offsets.stsd.is_audio()
+    }
+
+    pub fn audio_format(&self) -> Option<&AudioFormat> {
+        self.offsets.stsd.audio_format()
+    }
+
+    pub fn is_binary(&self) -> bool {
+        self.offsets.stsd.is_binary()
+    }
+
+    /// E.g. sample rate for audio track.
+    pub fn sample_rate(&self) -> Option<f64> {
+        self.offsets.stsd.sample_rate()
+    }
+
+    /// E.g. frame rate for video track.
+    pub fn frame_rate(&self) -> f64 {
+        // video sample_count * MP4 time_scale / MP4 unscaled_duration
+        self.offsets.len() as f64 * self.time_scale as f64 / self.duration as f64
+    }
+
+    /// E.g. frame rate for video track.
+    pub fn frame_rate_file(
+        &self,
+        mvhd_time_scale: u32,
+        mvhd_duration: u32,
+    ) -> f64 {
+        // video sample_count * MP4 time_scale / MP4 unscaled_duration
+        self.offsets.len() as f64 * mvhd_time_scale as f64 / mvhd_duration as f64
     }
 }

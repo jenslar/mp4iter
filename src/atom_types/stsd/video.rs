@@ -29,7 +29,6 @@ pub struct Video {
     data_size: u32,
     /// A 16-bit integer that indicates how many frames of compressed data are stored in each sample.
     frame_count: u16, // byte count so far 36
-    // frame_count: u32, // byte count so far 36
     /// A 32-byte Pascal string containing the name of the compressor that created the image, such as “jpeg”.
     /// NB: first byte = char count, remaining bytes are set to 0 so could possibly ignore
     /// length and just filter out null bytes.
