@@ -1,14 +1,12 @@
 //! Sample offsets consisting of byte offsets, extracted from `stco` (32bit) or `co64` (64bit) atom), size in bytes (extracted from `stsz` atom),
 //! and duration (extracted from `stts` atom).
 
-use std::{collections::HashMap, io::{Seek, SeekFrom}};
+use std::{collections::HashMap, io::SeekFrom};
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use time::Duration;
 
-use crate::{atom_types::AtomType, reader::AtomReadOrigin, Co64, FourCC, Mp4, Mp4Error, Stsd, TargetReader};
-
-use super::Sample;
+use crate::{atom_types::AtomType, reader::AtomReadOrigin, Co64, Mp4, Mp4Error, Stsd, TargetReader};
 
 /// Sample offsets consisting of byte offsets,
 /// (extracted from `stco` if 32bit or `co64` if 64bit atoms),

@@ -1,3 +1,6 @@
+//! Track sample. Wrapper over in-memory buffer `Cursor<Vec<u8>>`,
+//! complete with sample duration and relative timestamp.
+
 use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 
 use time::Duration;
@@ -6,7 +9,7 @@ use crate::{Mp4Error, Mp4Reader, TargetReader};
 
 use super::SampleOffset;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Sample {
     relative_time: Duration,
     sample_duration: Duration,

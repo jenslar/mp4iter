@@ -115,6 +115,12 @@ impl Mp4Reader {
         }
     }
 
+    pub(crate) fn end(&mut self) -> Result<(), Mp4Error>{
+        let _fb = self.file_reader.seek(SeekFrom::End(0))?;
+        let _mb = self.moov_reader.seek(SeekFrom::End(0))?;
+        Ok(())
+    }
+
     /// Seeks both streams to absolute file position `pos`,
     /// or the equivalent thereof (for `moov`).
     ///

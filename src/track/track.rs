@@ -27,12 +27,13 @@ pub struct Track<'a> {
 impl <'a> Track<'a> {
     pub fn new(
         mp4: &'a mut Mp4,
-        identifier: TrackIdentifier,
+        // identifier: TrackIdentifier,
+        identifier: impl ParsableTrackId,
         reset: bool
     ) -> Result<Self, Mp4Error> {
         // common atom order: tkhd -> mdhd -> hdlr -> stts -> stsz -> stco
 
-        let attributes = TrackAttributes::new(mp4, identifier, reset)?;
+        let attributes = TrackAttributes::new(mp4, identifier.to_trackid(), reset)?;
 
         // Always reset position
         // to enable relative seek.
@@ -170,9 +171,10 @@ impl <'a> Track<'a> {
     }
 
     /// Returns an iterator over increasing, relative timestamps
-    /// together with the sample's duration for the track,
-    /// yielded as `(Duration, Duration)` (`(relative_timestamp, sample_duration)`)
-    /// starting at 0.
+    /// (i.e. the video timeline) together with the sample's duration
+    /// for the track, yielded as `(Duration, Duration)`
+    /// (`(relative_timestamp, sample_duration)`)
+    /// starting from 0 for the relative timestamp.
     pub fn timestamps(&'a self) -> impl Iterator<Item = (Duration, Duration)> + 'a {
         let mut t = Duration::ZERO;
         self.attributes.offsets
@@ -184,14 +186,24 @@ impl <'a> Track<'a> {
             })
     }
 
+    /// Returns an iterator over the video timeline,
+    /// as nanoseconds. I.e. increasing timestamps,
+    /// starting from 0.
+    pub fn timeline_nanos(&'a self) -> impl Iterator<Item = i128> + 'a {
+        self.timestamps()
+            .map(|(ts, _)| ts.whole_nanoseconds())
+    }
+
     pub fn tmcd(&self) -> Result<Tmcd, Mp4Error> {
         self.attributes.offsets.stsd.tmcd()
     }
 
+    /// Returns
     pub fn number_of_frames(&self) -> Result<u8, Mp4Error> {
         Ok(self.tmcd()?.number_of_frames)
     }
 
+    /// Returns `true` for a video track.
     pub fn is_video(&self) -> bool {
         self.attributes.offsets.stsd.is_video()
     }
@@ -200,6 +212,7 @@ impl <'a> Track<'a> {
         self.attributes.offsets.stsd.video_format()
     }
 
+    /// Returns `true` for an audio track.
     pub fn is_audio(&self) -> bool {
         self.attributes.offsets.stsd.is_audio()
     }
@@ -208,10 +221,14 @@ impl <'a> Track<'a> {
         self.attributes.offsets.stsd.audio_format()
     }
 
+    /// Returns `true` for a "binary" track,
+    /// e.g. timed telemetry, such as for GoPro
+    /// cameras.
     pub fn is_binary(&self) -> bool {
         self.attributes.offsets.stsd.is_binary()
     }
 
+    /// Returns audio sample rate in Hz.
     pub fn sample_rate(&self) -> Option<f64> {
         self.attributes.offsets.stsd.sample_rate()
     }
@@ -221,7 +238,7 @@ impl <'a> Track<'a> {
 /// - Name: String extracted from `hdlr` atom (`handler_name`).
 /// - ID: Numerical ID extracted from `tkhd` atom.
 /// - SubType: String describing track type. Audio  = `soun`, video = `vide`. Extracted from `hdlr` atom.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TrackIdentifier<'a> {
     /// Track name
     Name(&'a str),
@@ -257,5 +274,51 @@ impl std::fmt::Display for TrackIdentifier<'_> {
             TrackIdentifier::Id(s) => write!(f, "{s}"),
             TrackIdentifier::SubType(s) => write!(f, "{s}"),
         }
+    }
+}
+
+pub trait ParsableTrackId {
+    fn to_trackid(&self) -> TrackIdentifier;
+}
+
+impl ParsableTrackId for u8 {
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Id(*self as u32)
+    }
+}
+
+impl ParsableTrackId for u16 {
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Id(*self as u32)
+    }
+}
+
+impl ParsableTrackId for u32 { // repeat for u8, u16, try -> panic u64/usize? + signed?
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Id(*self)
+    }
+}
+
+impl ParsableTrackId for u64 { // repeat for u8, u16, try -> panic u64/usize? + signed?
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Id(u32::try_from(*self).expect("TrackIdentifier failed to cast u64 to u32"))
+    }
+}
+
+impl ParsableTrackId for usize { // repeat for u8, u16, try -> panic u64/usize? + signed?
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Id(u32::try_from(*self).expect("TrackIdentifier failed to cast usize to u32"))
+    }
+}
+
+impl ParsableTrackId for &str {
+    fn to_trackid(&self) -> TrackIdentifier {
+        TrackIdentifier::Name(self.to_owned())
+    }
+}
+
+impl <'a> ParsableTrackId for TrackIdentifier<'a> {
+    fn to_trackid(&self) -> TrackIdentifier<'a> {
+        self.to_owned()
     }
 }

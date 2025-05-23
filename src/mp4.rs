@@ -27,13 +27,13 @@
 //!     }
 //!
 //!     // Extract information for a track
-//!     let video_track = mp4.track("GoPro H.265")?;
-//!     println!("{}", video_track.height);
-//!     println!("{}", video_track.width);
+//!     let track = mp4.track("GoPro H.265")?; // Use track name or numerical ID
+//!     println!("{}", track.height);
+//!     println!("{}", track.width);
 //!     // Iterate over raw track data
-//!     for (i, result) in video_track.cursors().enumerate() {
-//!         let raw = result?;
-//!         println!("{:04} {} bytes", i+1, raw.get_ref().len())
+//!     for (i, result) in track.samples().enumerate() {
+//!         let sample = result?;
+//!         println!("{:04} {} bytes", i+1, sample.len())
 //!     }
 //!
 //!     Ok(())
@@ -45,10 +45,7 @@ use std::{
 };
 
 use crate::{
-    atom_types::Stsc,
-    reader::AtomReadOrigin,
-    track::{Track, TrackAttributes, TrackIdentifier},
-    Atom, AtomHeader, AudioFormat, Co64, Dref, Ftyp, Hdlr, Mdhd, Mp4Error, Mp4Reader, Mvhd, SampleOffsets, ReadOption, Sdtp, Smhd, Stco, Stsd, Stss, Stsz, Stts, TargetReader, Tkhd, Tmcd, VideoFormat, Vmhd
+    atom_types::Stsc, reader::AtomReadOrigin, track::{ParsableTrackId, Track, TrackAttributes, TrackIdentifier}, Atom, AtomHeader, AudioFormat, Co64, Dref, Ftyp, Hdlr, Mdhd, Mp4Error, Mp4Reader, Mvhd, ReadOption, SampleOffsets, Sdtp, Smhd, Stco, Stsd, Stss, Stsz, Stts, TargetReader, Tkhd, Tmcd, VideoFormat, Vmhd
 };
 use binrw::{endian::Endian, BinRead, BinReaderExt};
 use time::{ext::NumericalDuration};
@@ -85,7 +82,6 @@ impl BufRead for Mp4 {
     }
 }
 
-// impl <R: Seek + Read + BinRead + BinReaderExt>Iterator for Mp4<R> {
 impl Iterator for Mp4 {
     type Item = AtomHeader;
 
@@ -135,10 +131,12 @@ impl Mp4 {
         self.path.to_owned()
     }
 
+    /// Returns the underlying reader over the entire file.
     pub fn file_reader(&mut self) -> &mut BufReader<File> {
         &mut self.reader.file_reader
     }
 
+    /// Returns the underlying in-memory reader over the `moov` atom.
     pub fn moov_reader(&mut self) -> &mut Cursor<Vec<u8>> {
         &mut self.reader.moov_reader
     }
@@ -172,6 +170,12 @@ impl Mp4 {
         self.reader.reset()
     }
 
+    /// Seek to end of MP4 file.
+    pub fn end(&mut self) -> Result<(), Mp4Error> {
+        self.reader.end()
+    }
+
+    /// Read a single type `T`.
     pub fn read_one<T>(
         &mut self,
         endian: Endian,
@@ -184,6 +188,7 @@ impl Mp4 {
         self.reader.read_one(&TargetReader::File, endian, pos, None)
     }
 
+    /// Read `n` types `T`.
     pub(crate) fn read_many<T>(
         &mut self,
         n: usize,
@@ -729,7 +734,8 @@ impl Mp4 {
     ///
     /// Some kinds of tracks may be present more than once, such audio if multi-languge,
     /// or two video tracks for 360 cameras.
-    pub fn track(&mut self, identifier: TrackIdentifier, reset: bool) -> Result<Track, Mp4Error> {
+    // pub fn track(&mut self, identifier: TrackIdentifier, reset: bool) -> Result<Track, Mp4Error> {
+    pub fn track(&mut self, identifier: impl ParsableTrackId, reset: bool) -> Result<Track, Mp4Error> {
         Track::new(self.borrow_mut(), identifier, reset)
     }
 

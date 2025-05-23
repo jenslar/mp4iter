@@ -2,8 +2,6 @@
 
 use std::{fmt, num::TryFromIntError};
 
-use crate::TrackIdentifier;
-
 #[derive(Debug)]
 pub enum Mp4Error {
     /// Converted `BinResult` error.

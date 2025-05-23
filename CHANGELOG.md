@@ -1,3 +1,7 @@
+# v0.5.2
+- NEW: `Mp4::track()` now takes `impl ParsableTrackId`, i.e. any of `u8`, `u16`, `u32`, `u64` (may panic), `usize` (may panic), `&str`, or `TrackIdentifier`. This is a non-breaking change.
+- NEW: `Track::timeline_nanos()` iterates over the samples' timeline, yielding relative timestamps in nanoseconds. Does not read sample data.
+
 # v0.5.1
 - Bumped crates.
 
