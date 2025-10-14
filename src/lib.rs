@@ -37,7 +37,8 @@ pub mod errors;
 
 // Internal reader
 pub(crate) mod reader;
-pub(crate) use reader::{Mp4Reader, ReadOption, TargetReader};
+pub(crate) use reader::{Mp4Reader, TargetReader};
+pub use reader::ReadOption;
 
 pub mod iterator;
 

@@ -1,6 +1,10 @@
+# v0.5.3
+- Bumped crates.
+
 # v0.5.2
 - NEW: `Mp4::track()` now takes `impl ParsableTrackId`, i.e. any of `u8`, `u16`, `u32`, `u64` (may panic), `usize` (may panic), `&str`, or `TrackIdentifier`. This is a non-breaking change.
 - NEW: `Track::timeline_nanos()` iterates over the samples' timeline, yielding relative timestamps in nanoseconds. Does not read sample data.
+- NEW: Methods `Mp4::read_one<T>()`, `Mp4::read_many<T>()`, `Mp4::read_byte()`, `Mp4::read_bytes()` are now public. Using these means you should use e.g. `Mp4::reset(true)` to regain position assurance or other methods, such as finding atoms, may fail.
 
 # v0.5.1
 - Bumped crates.

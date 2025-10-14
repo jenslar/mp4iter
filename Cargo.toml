@@ -8,5 +8,5 @@ keywords = ["MP4", "video", "parse"]
 
 [dependencies]
 binrw = "0.15"
-rayon = "1.10.0"
-time = {version = "0.3.41", features = ["formatting"]}
+rayon = "1.11.0"
+time = {version = "0.3.44", features = ["formatting"]}
