@@ -1,3 +1,6 @@
+# v0.5.4
+- Bump time crate and license year.
+
 # v0.5.3
 - Bumped crates.
 
